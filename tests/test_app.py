@@ -195,7 +195,7 @@ def test_price_alerts(client):
 def test_watchlist_prices_and_alerts(client):
     client.post("/login", data={"password": "edit-pass"})
     st = client.put("/api/watchlist", json={"tickers": ["MU", "STX", "NVDA"]}).json()
-    assert st["watchlist"] == ["MU", "NVDA", "STX"] and st["watch"] == {}
+    assert st["watchlist"] == ["MU", "NVDA", "STX"]   # prices for new names load in the background
     load(client.engine, ["MU", "STX"])
     st = client.get("/api/state").json()
     assert set(st["watch"]) >= {"MU", "STX"} and st["watch"]["MU"]["prevClose"] > 0 and "MU" in st["live"]
