@@ -315,18 +315,18 @@ function render(){
     if(!rows.length)$('pos').innerHTML=`<tbody><tr><td class="empty">No positions yet. ${S.canWrite?'Use Edit positions to add the first lot.':''}</td></tr></tbody>`;
     else{
       if(!S.sel||!rows.some(r=>r.t===S.sel))S.sel=(pr[0]||rows[0]).t;
-      let h=`<thead><tr><th>Holding</th><th>Current price</th><th>Day %</th><th>Daily P&amp;L</th><th>Accum. P&amp;L</th><th>Accum. %</th><th>Shares</th><th>Entry price</th><th>Market value</th><th>Weight</th><th>Beta</th><th>12M target</th><th>12M exp. return %</th></tr></thead><tbody>`;
+      let h=`<thead><tr><th>Holding</th><th>Current price</th><th>Day %</th><th>Daily P&amp;L</th><th>Accum. P&amp;L</th><th>Accum. %</th><th>Shares</th><th>Entry price</th><th>12M target</th><th>Market value</th><th>Weight</th><th>Beta</th><th>12M exp. return %</th></tr></thead><tbody>`;
       for(const r of rows){const q=r.q||{},hit=fired.get(r.t);
         h+=`<tr class="pos ${r.t===S.sel?'sel':''}" data-t="${esc(r.t)}" tabindex="0"><td><div class="tk">${esc(r.t)}</div><div class="nm">${esc(q.name||'Awaiting market data')}</div></td>
         <td class="num">${nf(q.last)}</td>
         <td><span class="chip ${cls(r.dayPct)}"${hit?` title="Crossed your ${nf(hit.threshold,1)}% alert"`:''}>${hit?'<span aria-hidden="true">&#9679; </span><span class="sr">Alert: </span>':''}${pct(r.dayPct)}</span></td>
         <td class="num ${cls(r.day)}">${susd(r.day)}</td><td class="num ${cls(r.pl)}">${susd(r.pl)}</td><td class="num ${cls(r.pl)}">${pct(r.mv!=null?r.pl/r.cost:null)}</td>
-        <td class="num">${nf(r.qty,0)}</td><td class="num">${nf(r.avg)}</td>
-        <td class="num">${usd(r.mv)}</td><td class="num">${r.w!=null?(r.w*100).toFixed(1)+'%':'—'}</td><td class="num">${nf(q.beta5y)}</td><td class="num">${nf(q.target?.avg)}</td><td class="num ${cls(r.up)}">${pct(r.up,1)}</td></tr>`;
+        <td class="num">${nf(r.qty,0)}</td><td class="num">${nf(r.avg)}</td><td class="num">${nf(q.target?.avg)}</td>
+        <td class="num">${usd(r.mv)}</td><td class="num">${r.w!=null?(r.w*100).toFixed(1)+'%':'—'}</td><td class="num">${nf(q.beta5y)}</td><td class="num ${cls(r.up)}">${pct(r.up,1)}</td></tr>`;
         if(S.open===r.t)for(const l of r.lots){const lp=q.last!=null?l.qty*(q.last-l.cost):null;
-          h+=`<tr class="lot"><td>Lot bought ${esc(l.date||'')}</td><td></td><td></td><td></td><td class="num ${cls(lp)}">${susd(lp)}</td><td class="num ${cls(lp)}">${pct(lp!=null?lp/(l.qty*l.cost):null)}</td><td class="num">${nf(l.qty,0)}</td><td class="num">${nf(l.cost)}</td><td class="num">${usd(q.last!=null?l.qty*q.last:null)}</td><td></td><td></td><td></td><td></td></tr>`;}
+          h+=`<tr class="lot"><td>Lot bought ${esc(l.date||'')}</td><td></td><td></td><td></td><td class="num ${cls(lp)}">${susd(lp)}</td><td class="num ${cls(lp)}">${pct(lp!=null?lp/(l.qty*l.cost):null)}</td><td class="num">${nf(l.qty,0)}</td><td class="num">${nf(l.cost)}</td><td></td><td class="num">${usd(q.last!=null?l.qty*q.last:null)}</td><td></td><td></td><td></td></tr>`;}
       }
-      h+=`</tbody><tfoot><tr><td>Total</td><td></td><td><span class="chip ${cls(T.day)}">${pct(T.day/(T.mv-T.day))}</span></td><td class="num ${cls(T.day)}">${susd(T.day)}</td><td class="num ${cls(T.pl)}">${susd(T.pl)}</td><td class="num ${cls(T.pl)}">${pct(T.pl/T.cost)}</td><td></td><td></td><td class="num">${usd(T.mv)}</td><td class="num">100%</td><td class="num">${nf(T.beta5)}</td><td></td><td class="num ${cls(T.e12)}">${pct(T.e12,1)}</td></tr></tfoot>`;
+      h+=`</tbody><tfoot><tr><td>Total</td><td></td><td><span class="chip ${cls(T.day)}">${pct(T.day/(T.mv-T.day))}</span></td><td class="num ${cls(T.day)}">${susd(T.day)}</td><td class="num ${cls(T.pl)}">${susd(T.pl)}</td><td class="num ${cls(T.pl)}">${pct(T.pl/T.cost)}</td><td></td><td></td><td></td><td class="num">${usd(T.mv)}</td><td class="num">100%</td><td class="num">${nf(T.beta5)}</td><td class="num ${cls(T.e12)}">${pct(T.e12,1)}</td></tr></tfoot>`;
       $('pos').innerHTML=h;
     }
   }
