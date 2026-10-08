@@ -229,3 +229,18 @@ def test_watchlist_starts_empty_and_preset_is_cleared_once(tmp_path, monkeypatch
     assert "PLTR" in create_app(mine, av=None).state.store.list_watch()
     old.replace_watch(PRESET_WATCH)
     assert len(create_app(old, av=None).state.store.list_watch()) == len(PRESET_WATCH)
+
+
+def test_chart_any_ticker(client):
+    assert client.get("/api/lookup?symbol=TSM").status_code == 401
+    client.post("/login", data={"password": "view-pass"})          # viewers may look tickers up
+    r = client.get("/api/lookup?symbol=tsm")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["symbol"] == "TSM" and len(body["hist"]["c"]) == 320 and len(body["hist"]["o"]) == 320
+    assert body["quote"]["last"] > 0 and body["quote"]["name"] and body["live"]["day"] == "2026-10-07"
+    st = client.get("/api/state").json()
+    assert "TSM" not in st["quotes"] and "TSM" not in st["watchlist"] and "TSM" not in st["watch"]
+    assert client.get("/api/lookup?symbol=BADTICKER").status_code == 404
+    assert client.get("/api/lookup?symbol=a%20b").status_code == 400
+    assert client.get("/api/lookup").status_code == 400

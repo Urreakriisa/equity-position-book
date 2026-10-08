@@ -210,6 +210,23 @@ class Engine:
             return {"rows": rows[-HIST_ROWS:]}
         await self._fresh("hist", sym, 0, load)
 
+    async def lookup(self, sym: str) -> dict:
+        """Price, history and consensus for any ticker, fetched on demand for
+        the chart's ticker box. Nothing is added to the portfolio or watchlist."""
+        if self.av is None:
+            raise AVError("Market data is off")
+        await self._fresh("quote", sym, 55, self._load_quote)
+        await self._ensure_history(sym)
+        await self._fresh("ov", sym, 24 * 3600, self._load_overview)
+        view, rows = self._quote_view(sym), (self.store.get(f"hist:{sym}") or {}).get("rows") or []
+        if not view or len(rows) < 2:
+            raise AVError(f"No price data found for {sym}")
+        ov = self.store.get(f"ov:{sym}") or {}
+        return {"symbol": sym, "live": self._live(sym),
+                "quote": {**view, "name": ov.get("name") or sym, "target": ov.get("target"), "beta5y": ov.get("beta5y")},
+                "hist": {"d": [r[0] for r in rows], "o": [r[1] for r in rows], "h": [r[2] for r in rows],
+                         "l": [r[3] for r in rows], "c": [r[4] for r in rows]}}
+
     # ---- what the page reads -----------------------------------------------
     def _quote_view(self, sym: str) -> dict | None:
         """Latest price for a symbol: the live quote, else the last close."""

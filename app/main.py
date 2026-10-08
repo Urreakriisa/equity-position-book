@@ -20,7 +20,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import build
-from .av import AlphaVantage
+from .av import AlphaVantage, AVError
 from .engine import PRESET_WATCH, Engine
 from .store import Store
 
@@ -168,6 +168,24 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
     def api_history(request: Request):
         need(request)
         return engine.history()
+
+    lookups: list[float] = []
+
+    @app.get("/api/lookup")
+    async def api_lookup(request: Request, symbol: str = ""):
+        need(request)
+        sym = symbol.strip().upper()
+        if not TICKER.match(sym):
+            raise HTTPException(400, "Enter one ticker, for example MU")
+        now = time.time()
+        lookups[:] = [t for t in lookups if now - t < 60]
+        if len(lookups) >= 20:
+            raise HTTPException(429, "Too many lookups in a minute. Try again shortly")
+        lookups.append(now)
+        try:
+            return await engine.lookup(sym)
+        except AVError as e:
+            raise HTTPException(404 if "No price data" in str(e) else 503, str(e)) from None
 
     async def json_body(request: Request) -> dict:
         if "application/json" not in request.headers.get("content-type", ""):

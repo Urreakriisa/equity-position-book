@@ -173,7 +173,7 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
   <div class="two">
     <section class="panel">
       <div class="ph"><h2>Price chart</h2><div class="pills" id="pills"></div></div>
-      <div class="pb"><div class="chead" id="chead"></div><div class="chartbox" id="chart"><div class="empty">Chart loads with the price history.</div></div><div id="ta"></div></div>
+      <div class="pb"><form class="wl" id="lkForm" style="padding:0 0 12px;border-bottom:0"><label for="lkIn" class="mut" style="font-size:12.5px">Chart any ticker</label><input id="lkIn" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="10" placeholder="For example TSM" style="flex:0 1 170px;min-width:120px;text-transform:uppercase"><button id="lkGo">Show chart</button><span class="err" id="lkErr"></span></form><div class="chead" id="chead"></div><div class="chartbox" id="chart"><div class="empty">Chart loads with the price history.</div></div><div id="ta"></div></div>
     </section>
     <section class="panel">
       <div class="ph"><h2>Risk and expected return</h2></div>
@@ -227,7 +227,7 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
 </dialog>
 
 <script>
-const S={lots:[],quotes:{},news:[],market:{},watch:{},idx:{},isel:'SPX',live:{},delayed:true,note:'',alerts:{default:null,watchDefault:null,by:{}},events:[],wsel:null,got:{},sel:null,view:'stock',range:'6M',newsF:'ALL',open:null,canWrite:false};
+const S={lots:[],quotes:{},news:[],market:{},watch:{},idx:{},isel:'SPX',live:{},delayed:true,note:'',alerts:{default:null,watchDefault:null,by:{}},events:[],wsel:null,adhoc:null,got:{},sel:null,view:'stock',range:'6M',newsF:'ALL',open:null,canWrite:false};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nf=(v,d=2)=>v==null||!isFinite(v)?'—':v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -341,8 +341,8 @@ function render(){
       :`<tbody><tr><td class="empty">Your watchlist is empty. ${S.canWrite?'Add a ticker above to start following it.':''}</td></tr></tbody>`;
   }
   // pills + chart
-  const ixs=['SPX','DJI','IXIC'].filter(k=>S.idx[k]?.hist),cur=S.view==='port'?'__P':S.view==='idx'?'__I'+S.isel:S.view==='watch'?'__W':S.sel;
-  $('pills').innerHTML=pr.length?[['__P','Portfolio vs S&P 500'],...pr.map(r=>[r.t,r.t]),...ixs.map(k=>['__I'+k,S.idx[k].name]),...(S.view==='watch'&&S.wsel?[['__W',S.wsel+' · watchlist']]:[])].map(([k,l])=>`<button type="button" data-k="${esc(k)}" aria-pressed="${cur===k}">${esc(l)}</button>`).join(''):'';
+  const ixs=['SPX','DJI','IXIC'].filter(k=>S.idx[k]?.hist),cur=S.view==='port'?'__P':S.view==='idx'?'__I'+S.isel:S.view==='watch'?'__W':S.view==='adhoc'?'__A':S.sel;
+  $('pills').innerHTML=pr.length||S.view==='adhoc'?[['__P','Portfolio vs S&P 500'],...pr.map(r=>[r.t,r.t]),...ixs.map(k=>['__I'+k,S.idx[k].name]),...(S.view==='watch'&&S.wsel?[['__W',S.wsel+' · watchlist']]:[]),...(S.view==='adhoc'&&S.adhoc?[['__A',S.adhoc.t+' · lookup']]:[])].map(([k,l])=>`<button type="button" data-k="${esc(k)}" aria-pressed="${cur===k}">${esc(l)}</button>`).join(''):'';
   drawChart(M);
   // risk
   if(pr.length){
@@ -403,7 +403,7 @@ function drawRecs(M){
 }
 
 function drawChart(M){
-  const box=$('chart'),hd=$('chead');const pr=M.pr;if(!pr.length){return;}
+  const box=$('chart'),hd=$('chead');const pr=M.pr;if(!pr.length&&S.view!=='adhoc'&&S.view!=='watch'){return;}
   const css=getComputedStyle(document.documentElement),C=n=>css.getPropertyValue(n).trim();
   let series,ref=null,fy=v=>nf(v,v<100?2:0);
   if(S.view==='port'){
@@ -412,6 +412,9 @@ function drawChart(M){
     ref={y:100,label:'100'};fy=v=>nf(v,1);
     hd.innerHTML=`<span class="big num">${pct(M.st.ret,1)}</span><span class="mut">portfolio vs ${pct(M.st.mret,1)} for SPY, last ${M.st.n} trading days, both indexed to 100</span><div class="legend" style="flex-basis:100%">${series.map(s=>`<span><i style="background:${s.color}"></i>${s.name}</span>`).join('')}</div>`;
     $('ta').innerHTML='';
+  }else if(S.view==='adhoc'&&S.adhoc){
+    const a=S.adhoc,q=a.live?{...a.q,last:a.live.last,prevClose:a.live.prevClose,asOf:a.live.day+' live',live:a.live}:a.q;
+    return drawCandles({t:a.t,avg:null,dayPct:q.prevClose?q.last/q.prevClose-1:null,q:{...q,name:(q.name||a.t)+' · lookup, not in your portfolio or watchlist'}},box,hd,C);
   }else if(S.view==='watch'){
     const w=watchRows().find(x=>x.t===S.wsel);
     if(!w||!(w.q?.hist?.d?.length>1)){box.innerHTML='<div class="empty">Price history for '+esc(S.wsel||'this stock')+' is still loading. It usually arrives within a couple of minutes.</div>';hd.innerHTML='';$('ta').innerHTML='';return;}
@@ -563,7 +566,7 @@ $('watchT').addEventListener('click',async e=>{const rm=e.target.closest('[data-
   const tr=e.target.closest('tr.pos');if(!tr)return;S.view='watch';S.wsel=tr.dataset.t;render();$('chart').scrollIntoView({block:'center',behavior:'smooth'});});
 $('watchT').addEventListener('keydown',e=>{if(e.key==='Enter'){const tr=e.target.closest('tr.pos');if(tr)tr.click();}});
 $('pos').addEventListener('keydown',e=>{if(e.key==='Enter'){const tr=e.target.closest('tr.pos');if(tr)tr.click();}});
-$('pills').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.k==='__W')return;if(b.dataset.k==='__P')S.view='port';else if(b.dataset.k.startsWith('__I')){S.view='idx';S.isel=b.dataset.k.slice(3);}else{S.view='stock';S.sel=b.dataset.k;}render();});
+$('pills').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.k==='__W'||b.dataset.k==='__A')return;if(b.dataset.k==='__P')S.view='port';else if(b.dataset.k.startsWith('__I')){S.view='idx';S.isel=b.dataset.k.slice(3);}else{S.view='stock';S.sel=b.dataset.k;}render();});
 $('chead').addEventListener('click',e=>{const b=e.target.closest('[data-r]');if(!b)return;S.range=b.dataset.r;drawChart(model());});
 $('newsPills').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.newsF=b.dataset.k;render();});
 let rt;addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>drawChart(model()),150);});
@@ -588,6 +591,23 @@ $('dform').addEventListener('submit',async e=>{e.preventDefault();readDraft();co
     apply(st);$('dlg').close();
   }catch(x){err.textContent=x.message||'Could not save. Try again in a moment.';}
   $('dSave').disabled=false;});
+
+// chart any ticker
+async function lookup(t,quiet){
+  const err=$('lkErr'),btn=$('lkGo');if(!quiet){err.textContent='';btn.disabled=true;btn.textContent='Loading…';}
+  try{const r=await api('/api/lookup?symbol='+encodeURIComponent(t));
+    if(quiet&&(S.view!=='adhoc'||S.adhoc?.t!==r.symbol))return;      // the user moved on meanwhile
+    S.adhoc={t:r.symbol,q:{...r.quote,hist:r.hist},live:r.live,at:Date.now()};S.view='adhoc';render();
+    if(!quiet)$('lkIn').value='';
+  }catch(x){if(!quiet)err.textContent=x.message||'Could not load that ticker.';}
+  if(!quiet){btn.disabled=false;btn.textContent='Show chart';}
+}
+$('lkForm').addEventListener('submit',e=>{e.preventDefault();const t=$('lkIn').value.trim().toUpperCase();
+  if(!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(t)){$('lkErr').textContent='Enter one ticker, for example TSM.';return;}
+  const held=M0().rows.find(r=>r.t===t&&r.q?.hist);if(held){S.view='stock';S.sel=t;$('lkErr').textContent='';$('lkIn').value='';render();return;}
+  lookup(t,false);});
+const M0=()=>model();
+setInterval(()=>{if(!document.hidden&&S.view==='adhoc'&&S.adhoc&&Date.now()-S.adhoc.at>60000)lookup(S.adhoc.t,true);},15000);
 
 // price alerts
 const LS={get(k){try{return JSON.parse(localStorage.getItem(k)||'[]');}catch(e){return [];}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v.slice(-200)));}catch(e){}}};
