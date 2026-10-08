@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Sign in · Equity Position Book</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#eef1f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c1117" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&display=swap">
+<style>
+:root{--bg:#eef1f4;--surface:#fff;--ink:#101922;--muted:#566575;--line:#d9e0e7;--accent:#2f62e0;--dn:#c0342c;color-scheme:light}
+@media (prefers-color-scheme: dark){:root{--bg:#0c1117;--surface:#141b23;--ink:#e7edf3;--muted:#8a9aab;--line:#25313d;--accent:#4f7ee6;--dn:#ff7166;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Archivo","Helvetica Neue",Arial,sans-serif;font-size:15px;display:grid;place-items:center;padding:20px}
+form{width:min(360px,100%);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:26px 24px;display:flex;flex-direction:column;gap:14px}
+h1{font-size:22px;font-weight:800;font-stretch:112%;margin:0}
+p{margin:0;color:var(--muted);font-size:13.5px}
+label{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+input{font:inherit;font-size:16px;padding:11px 12px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);width:100%}
+button{font:inherit;font-weight:700;padding:11px 14px;border:0;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer}
+input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.err{color:var(--dn);font-size:13.5px;min-height:1.2em}
+</style>
+</head>
+<body>
+<form method="post" action="/login">
+  <h1>Equity Position Book</h1>
+  <p>Enter the portfolio password to continue.</p>
+  <div style="display:flex;flex-direction:column;gap:6px"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus></div>
+  <div class="err" role="alert">{{message}}</div>
+  <button type="submit">Sign in</button>
+</form>
+</body>
+</html>
