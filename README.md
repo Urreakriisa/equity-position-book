@@ -49,6 +49,22 @@ minutes before every panel is filled.
 
 About 15 requests a minute are used during market hours with ten holdings.
 
+## Price alerts and notifications
+
+Set alert levels under **Price alerts** (a general level for holdings, one for
+the watchlist, and per-stock overrides). When a stock's move for the day passes
+its level, the app shows a banner and sends a web push to every device that has
+tapped **Enable alerts**.
+
+- Push is ported from Tlalocai (Estacion Virreyes): a VAPID key pair created on
+  first use, one subscription per device, delivery in a background thread, dead
+  endpoints pruned. Here the key pair and subscriptions live in the database,
+  not on a volume, and this app has its own key pair.
+- iPhone and iPad: add the app to the Home Screen first (iOS 16.4 or later),
+  open it from there, then tap **Enable alerts**.
+- `VAPID_SUBJECT` (optional) overrides the contact address sent to push
+  services. By default it is the app's own Railway address.
+
 ## Run it on your own computer
 
 ```

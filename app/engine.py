@@ -55,6 +55,7 @@ class Engine:
         self.quote_interval = max(15, quote_interval)
         self.delayed = delayed
         self._failed: dict[str, float] = {}
+        self.on_alert = None            # called with each new alert event
         self._tasks: list[asyncio.Task] = []
         self.last_error = ""
 
@@ -174,9 +175,16 @@ class Engine:
         eid = f'{sym}-{q["day"]}-{level:g}'
         if any(e["id"] == eid for e in events):
             return
-        events.append({"id": eid, "ticker": sym, "day": q["day"], "pct": round(move, 2),
-                       "threshold": level, "last": q["last"], "at": time.time()})
+        event = {"id": eid, "ticker": sym, "day": q["day"], "pct": round(move, 2),
+                 "threshold": level, "last": q["last"], "at": time.time(),
+                 "watch": sym not in self.held()}
+        events.append(event)
         self.store.put("alert_events", {"items": events[-100:]})
+        if self.on_alert:
+            try:
+                self.on_alert(event)
+            except Exception:                              # a notifier must never break pricing
+                log.exception("alert notifier failed")
         log.info("alert: %s moved %.2f%% (level %s%%)", sym, move, level)
 
     async def _load_overview(self, sym):

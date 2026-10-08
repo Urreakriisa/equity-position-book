@@ -244,3 +244,85 @@ def test_chart_any_ticker(client):
     assert client.get("/api/lookup?symbol=BADTICKER").status_code == 404
     assert client.get("/api/lookup?symbol=a%20b").status_code == 400
     assert client.get("/api/lookup").status_code == 400
+
+
+SUB = {"endpoint": "https://fcm.googleapis.com/fcm/send/abc123", "keys": {"p256dh": "BPubKey", "auth": "authsecret"}}
+
+
+def test_push_subscribe_alert_and_prune(client, monkeypatch):
+    import app.push as push_mod
+    push = client.app.state.push
+    sent = []
+
+    class Gone(Exception):
+        response = type("R", (), {"status_code": 410})()
+
+    def fake_webpush(**kw):
+        if "dead" in kw["subscription_info"]["endpoint"]:
+            raise Gone()
+        sent.append(kw)
+
+    monkeypatch.setattr(push_mod, "_webpush", fake_webpush)
+    monkeypatch.setattr(push, "send", lambda *a: push.deliver(*a))       # deliver inline, no thread
+
+    assert client.get("/api/push/pubkey").status_code == 401
+    assert client.post("/api/push/subscribe", json=SUB).status_code == 401
+    assert client.get("/sw.js").status_code == 200 and "showNotification" in client.get("/sw.js").text
+    client.post("/login", data={"password": "view-pass"})                 # any signed-in device may opt in
+    key = client.get("/api/push/pubkey").json()["key"]
+    assert len(key) == 87 and client.get("/api/push/pubkey").json()["key"] == key    # 65-byte point, stable
+    assert "private" not in client.get("/api/push/pubkey").text
+
+    for bad in ({"endpoint": "https://evil.example.com/x", "keys": SUB["keys"]},
+                {"endpoint": "http://fcm.googleapis.com/x", "keys": SUB["keys"]},
+                {"endpoint": SUB["endpoint"]}, {"endpoint": SUB["endpoint"], "keys": {"p256dh": "", "auth": "a"}}, {}):
+        assert client.post("/api/push/subscribe", json=bad).status_code == 400
+    assert client.post("/api/push/subscribe", json=SUB).json() == {"devices": 1}
+    assert client.post("/api/push/subscribe", json=SUB).json() == {"devices": 1}      # same device twice = once
+    dead = {"endpoint": "https://web.push.apple.com/dead", "keys": SUB["keys"]}
+    assert client.post("/api/push/subscribe", json=dead).json() == {"devices": 2}
+
+    assert client.post("/api/push/test", json={"endpoint": SUB["endpoint"]}).json() == {"ok": True}
+    assert json.loads(sent[-1]["data"])["title"] == "Test alert" and sent[-1]["vapid_claims"]["sub"].startswith("https://")
+    assert client.post("/api/push/test", json={"endpoint": "https://fcm.googleapis.com/other"}).status_code == 404
+
+    # a price alert reaches the live device, and the dead one is dropped
+    client.post("/logout")
+    client.post("/login", data={"password": "edit-pass"})
+    held = sorted({l["ticker"] for l in client.get("/api/state").json()["lots"]})
+    load(client.engine, held)
+    sent.clear()
+    st = client.put("/api/alerts", json={"default": 0.0001}).json()
+    assert len(st["alertEvents"]) == len(held) == len(sent)
+    note = json.loads(sent[0]["data"])
+    assert "% today" in note["title"] and note["body"].startswith("Past your 0.0001% alert. Price ")
+    assert [s["endpoint"] for s in push.subscriptions()] == [SUB["endpoint"]]
+    # the same crossings do not notify again
+    sent.clear()
+    load(client.engine, held)
+    assert sent == []
+    assert client.post("/api/push/unsubscribe", json={"endpoint": SUB["endpoint"]}).json() == {"devices": 0}
+
+
+def test_push_real_encryption_and_vapid_signing(tmp_path, monkeypatch):
+    """Run the real library (without sending) to prove the stored key signs."""
+    monkeypatch.chdir(tmp_path)          # the library writes its payload file to the working directory
+    pytest.importorskip("pywebpush")
+    import base64
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from pywebpush import webpush
+    from app.push import Push
+    b64 = lambda raw: base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+    device = ec.generate_private_key(ec.SECP256R1())
+    sub = {"endpoint": "https://fcm.googleapis.com/fcm/send/abc",
+           "keys": {"p256dh": b64(device.public_key().public_bytes(serialization.Encoding.X962,
+                                                                   serialization.PublicFormat.UncompressedPoint)),
+                    "auth": b64(b"0123456789abcdef")}}
+    push = Push(Store(f"sqlite:///{tmp_path}/p.db"), "https://example.test")
+    key = push._vapid()
+    curl = webpush(subscription_info=sub, data='{"title":"t"}', vapid_private_key=key["private"],
+                   vapid_claims={"sub": push.subject}, ttl=60, curl=True)
+    assert "fcm.googleapis.com" in curl and "vapid" in curl.lower() and key["public"] in curl
+    # a second app instance on the same database reuses the same key pair
+    assert Push(push.store, "x")._vapid()["public"] == key["public"]

@@ -143,8 +143,9 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
     <div>
       <h1>Equity Position Book</h1>
       <div class="stamp" id="stamp">Loading portfolio…</div>
+      <div class="stamp" id="pushNote" role="status" hidden></div>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap"><button id="alertBtn" hidden>Price alerts</button><button id="editBtn" class="primary" hidden>Edit positions</button><form method="post" action="/logout" style="margin:0"><button type="submit">Sign out</button></form></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button id="pushBtn" hidden>Enable alerts</button><button id="alertBtn" hidden>Price alerts</button><button id="editBtn" class="primary" hidden>Edit positions</button><form method="post" action="/logout" style="margin:0"><button type="submit">Sign out</button></form></div>
   </header>
 
   <section class="tape num" id="tape" aria-label="Market indexes"><div><b>MARKET INDEXES</b><span class="lv mut">Loading…</span></div></section>
@@ -213,7 +214,7 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
     </div>
     <div class="scroll" style="max-height:40vh;overflow-y:auto"><table><thead><tr><th>Stock</th><th>Today</th><th>Alert at &plusmn; %</th></tr></thead><tbody id="aRows"></tbody></table></div>
     <div class="pb note" id="aNote" style="padding-block:10px"></div>
-    <div class="dfoot"><span class="err" id="aErr"></span><button type="button" id="aNotif" hidden>Notify me on this device</button><button class="primary" id="aSave">Save alerts</button></div>
+    <div class="dfoot"><span class="err" id="aErr"></span><button type="button" id="pushTest" hidden>Send a test alert</button><button class="primary" id="aSave">Save alerts</button></div>
   </form>
 </dialog>
 
@@ -613,21 +614,53 @@ setInterval(()=>{if(!document.hidden&&S.view==='adhoc'&&S.adhoc&&Date.now()-S.ad
 const LS={get(k){try{return JSON.parse(localStorage.getItem(k)||'[]');}catch(e){return [];}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v.slice(-200)));}catch(e){}}};
 const dismissed=()=>LS.get('epb_dismissed');
 $('alerts').addEventListener('click',e=>{const b=e.target.closest('[data-dismiss]');if(!b)return;LS.set('epb_dismissed',[...dismissed(),b.dataset.dismiss]);render();});
-function announce(){   // a system notification for crossings this device has not seen yet
-  const seen=LS.get('epb_seen'),fresh=S.events.filter(e=>!seen.includes(e.id)&&Date.now()/1000-e.at<6*3600);
-  if(!fresh.length)return;LS.set('epb_seen',[...seen,...fresh.map(e=>e.id)]);
-  if(!('Notification' in window)||Notification.permission!=='granted')return;
-  for(const e of fresh){try{new Notification(`${e.ticker} ${pct(e.pct/100)} today`,{body:`Past your ${nf(e.threshold,1)}% alert. Price ${nf(e.last)}.`,tag:e.id,icon:'/static/icon-192.png'});}catch(x){}}
+// push notifications (ported from Tlalocai): opt-in per device, delivered even when the app is closed
+const JSONH={'Content-Type':'application/json'};
+const PUSH_OK='serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;
+const IOS=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+let pushSub=null,pushSynced=false;
+function b64ToU8(b){const p='='.repeat((4-b.length%4)%4),t=atob((b+p).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(t,c=>c.charCodeAt(0));}
+async function pushRefresh(msg){
+  const btn=$('pushBtn'),note=$('pushNote');
+  if(!PUSH_OK){btn.hidden=true;$('pushTest').hidden=true;
+    note.textContent=IOS?'To get price alerts on this iPhone or iPad, add the app to your Home Screen (Share, then Add to Home Screen), open it from there and tap Enable alerts.':'';
+    note.hidden=!note.textContent;return;}
+  try{const reg=await navigator.serviceWorker.ready;pushSub=await reg.pushManager.getSubscription();}catch(e){pushSub=null;}
+  if(pushSub&&!pushSynced){pushSynced=true;api('/api/push/subscribe',{method:'POST',headers:JSONH,body:JSON.stringify(pushSub.toJSON())}).catch(()=>{});}   // keep the server's list in step
+  btn.hidden=false;btn.textContent=pushSub?'Alerts on':'Enable alerts';btn.setAttribute('aria-pressed',String(!!pushSub));
+  btn.title=pushSub?'This device is notified when a price alert fires. Select to turn it off.':'Be notified on this device when a price alert fires, even with the app closed';
+  note.textContent=msg||(Notification.permission==='denied'&&!pushSub?'Notifications are blocked for this site in your browser settings, so alerts cannot be turned on here.':'');
+  note.hidden=!note.textContent;$('pushTest').hidden=!pushSub;
 }
-function notifState(){const b=$('aNotif'),ok='Notification' in window;b.hidden=!ok||Notification.permission!=='default';
-  $('aNote').textContent='Alerts are checked each time prices refresh and show at the top of this page for everyone who signs in. '+(!ok?'This browser cannot show system notifications, so alerts appear only inside the app.':Notification.permission==='granted'?'This device also gets a system notification while the app is open in a tab or window.':Notification.permission==='denied'?'System notifications are blocked for this site in your browser settings.':'Choose "Notify me on this device" to also get a system notification while the app is open.');}
-$('aNotif').addEventListener('click',async()=>{try{await Notification.requestPermission();}catch(x){}notifState();});
+$('pushBtn').addEventListener('click',async()=>{
+  const btn=$('pushBtn');btn.disabled=true;let msg='';
+  try{
+    if(pushSub){
+      await api('/api/push/unsubscribe',{method:'POST',headers:JSONH,body:JSON.stringify({endpoint:pushSub.endpoint})}).catch(()=>{});
+      await pushSub.unsubscribe();msg='Alerts are off on this device.';
+    }else if(await Notification.requestPermission()!=='granted'){      // asked first, while this still counts as your tap
+      msg='Notifications were not allowed, so alerts stay off on this device.';
+    }else{
+      const reg=await navigator.serviceWorker.ready,k=await api('/api/push/pubkey');
+      const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToU8(k.key)});
+      await api('/api/push/subscribe',{method:'POST',headers:JSONH,body:JSON.stringify(sub.toJSON())});pushSynced=true;
+      msg='Alerts are on for this device. Set the levels under Price alerts.';
+    }
+  }catch(e){msg='Could not change alerts on this device: '+(e.message||'unknown error')+'.';}
+  btn.disabled=false;pushRefresh(msg);
+});
+$('pushTest').addEventListener('click',async()=>{const b=$('pushTest'),err=$('aErr');b.disabled=true;err.textContent='';
+  try{await api('/api/push/test',{method:'POST',headers:JSONH,body:JSON.stringify({endpoint:pushSub?.endpoint})});$('aNote').textContent='Test sent. It should appear on this device within a few seconds.';}
+  catch(e){err.textContent=e.message||'The test could not be sent.';}
+  b.disabled=false;});
+if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').then(()=>pushRefresh()).catch(()=>pushRefresh()));
+else addEventListener('load',()=>pushRefresh());
 $('alertBtn').addEventListener('click',()=>{const M=model();$('aErr').textContent='';$('aDef').value=S.alerts.default??'';
   $('aWDef').value=S.alerts.watchDefault??'';
   const arow=(r,gen)=>`<tr><td><span class="tk">${esc(r.t)}</span></td><td class="num ${cls(r.dayPct)}">${pct(r.dayPct)}</td><td><input data-t="${esc(r.t)}" aria-label="Alert level for ${esc(r.t)}" inputmode="decimal" placeholder="${gen!=null?'General: '+gen+'%':'Off'}" value="${esc(S.alerts.by?.[r.t]??'')}" style="width:130px"></td></tr>`;
   const wr=watchRows(),sub=t=>`<tr class="lot"><td colspan="3" style="font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:11px">${t}</td></tr>`;
   $('aRows').innerHTML=(M.rows.length?sub('Holdings')+M.rows.map(r=>arow(r,S.alerts.default)).join(''):'')+(wr.length?sub('Watchlist')+wr.map(r=>arow(r,S.alerts.watchDefault)).join(''):'');
-  notifState();$('adlg').showModal();});
+  $('aNote').textContent='Alerts are checked each time prices refresh and show at the top of the app for everyone who signs in. To be notified on a phone or computer even when the app is closed, use Enable alerts on that device.';$('adlg').showModal();});
 $('aClose').addEventListener('click',()=>$('adlg').close());
 $('aform').addEventListener('submit',async e=>{e.preventDefault();const err=$('aErr');err.textContent='';
   const num=v=>{v=String(v).trim().replace('%','');if(v==='')return null;const x=+v;return x>0&&x<=100?x:NaN;};
@@ -669,7 +702,7 @@ function apply(st){
   S.market={...st.market,bench:H.SPY?{SPY:{d:H.SPY.d,c:H.SPY.c}}:null};
   S.note=!st.configured?'Market data is off: add ALPHAVANTAGE_API_KEY to the app\'s settings.':'';
   S.got.lots=true;S.got.news=true;
-  $('editBtn').hidden=!S.canWrite;$('wlForm').hidden=!S.canWrite;$('alertBtn').hidden=!S.canWrite;announce();
+  $('editBtn').hidden=!S.canWrite;$('wlForm').hidden=!S.canWrite;$('alertBtn').hidden=!S.canWrite;
   render();
 }
 async function tick(){
@@ -686,7 +719,6 @@ async function tick(){
 render();tick();
 setInterval(()=>{if(!document.hidden&&!$('dlg').open&&!$('adlg').open)tick();},20000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick();});
-if('serviceWorker' in navigator)navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
 </script>
 </body>
 </html>

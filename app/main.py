@@ -22,6 +22,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from . import build
 from .av import AlphaVantage, AVError
 from .engine import PRESET_WATCH, Engine
+from .push import Push, clean_subscription
 from .store import Store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -50,6 +51,16 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
             log.warning("ALPHAVANTAGE_API_KEY is not set: no market data will load")
     delayed = env.get("AV_ENTITLEMENT", "delayed") != "realtime"
     engine = Engine(store, av, int(env.get("QUOTE_INTERVAL", "60")), delayed)
+    # Push notifications identify the sender by a contact address: the app's own URL.
+    domain = env.get("RAILWAY_PUBLIC_DOMAIN", "").strip()
+    push = Push(store, env.get("VAPID_SUBJECT") or (f"https://{domain}" if domain else "https://github.com/Urreakriisa/equity-position-book"))
+
+    def notify(e: dict) -> None:
+        where = " (watchlist)" if e.get("watch") else ""
+        push.send(f'{e["ticker"]} {e["pct"]:+.2f}% today{where}',
+                  f'Past your {e["threshold"]:g}% alert. Price {e["last"]:,.2f}.', e["id"])
+
+    engine.on_alert = notify
 
     # First run: load the starting positions and watchlist, once.
     if not store.get("seeded"):
@@ -81,7 +92,7 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
             await av.aclose()
 
     app = FastAPI(title="Equity Position Book", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-    app.state.engine, app.state.store = engine, store
+    app.state.engine, app.state.store, app.state.push = engine, store, push
     app.add_middleware(GZipMiddleware, minimum_size=1000)
     app.add_middleware(SessionMiddleware, secret_key=secret, session_cookie="epb_session",
                        max_age=30 * 24 * 3600, same_site="lax", https_only=on_https)
@@ -155,6 +166,12 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
         if not role(request):
             return RedirectResponse("/login", 303)
         return FileResponse(HERE / "templates" / "index.html", media_type="text/html")
+
+    @app.get("/sw.js")
+    def service_worker():
+        # Served from the root so it can receive pushes for the whole app.
+        return FileResponse(HERE / "static" / "sw.js", media_type="text/javascript",
+                            headers={"Service-Worker-Allowed": "/"})
 
     @app.get("/healthz")
     def healthz():
@@ -269,6 +286,40 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
             if (q := store.get(f"quote:{sym}")):
                 await asyncio.to_thread(engine._check_alert, sym, q)
         return await asyncio.to_thread(engine.state, True)
+
+    # ---- push notifications (per device, opt-in) ----------------------------
+    @app.get("/api/push/pubkey")
+    def push_pubkey(request: Request):
+        need(request)
+        return {"key": push.public_key(), "devices": len(push.subscriptions())}
+
+    @app.post("/api/push/subscribe")
+    async def push_subscribe(request: Request):
+        need(request)
+        sub = clean_subscription(await json_body(request))
+        if not sub:
+            raise HTTPException(400, "That is not a valid push subscription")
+        return {"devices": await asyncio.to_thread(push.subscribe, sub)}
+
+    @app.post("/api/push/unsubscribe")
+    async def push_unsubscribe(request: Request):
+        need(request)
+        endpoint = (await json_body(request)).get("endpoint")
+        if not isinstance(endpoint, str):
+            raise HTTPException(400, "Send the subscription endpoint")
+        return {"devices": await asyncio.to_thread(push.unsubscribe, endpoint)}
+
+    @app.post("/api/push/test")
+    async def push_test(request: Request):
+        need(request)
+        endpoint = (await json_body(request)).get("endpoint")
+        if not isinstance(endpoint, str) or not any(s["endpoint"] == endpoint for s in push.subscriptions()):
+            raise HTTPException(404, "This device is not subscribed")
+        result = await asyncio.to_thread(push.deliver, "Test alert", "Price alerts are working on this device.",
+                                         "test", endpoint)
+        if not result["sent"]:
+            raise HTTPException(502, "The push service did not accept the test. Turn alerts off and on again")
+        return {"ok": True}
 
     @app.exception_handler(HTTPException)
     async def http_error(_, exc: HTTPException):
