@@ -20,7 +20,8 @@ HIST_ROWS = 760                       # about three years of sessions
 INDEX_ETFS = {"SPX": ("S&P 500", "SPY"), "DJI": ("Dow Jones", "DIA"),
               "IXIC": ("Nasdaq Composite", "ONEQ"), "RUT": ("Russell 2000", "IWM")}
 CHART_INDEXES = ("SPX", "DJI", "IXIC")
-DEFAULT_WATCH = ["STX", "MU", "IREN", "USAR", "META", "BABA", "STRL", "TSM", "TTMI", "SIMO"]
+# The list earlier builds pre-filled; kept only so it can be cleared once.
+PRESET_WATCH = ["STX", "MU", "IREN", "USAR", "META", "BABA", "STRL", "TSM", "TTMI", "SIMO"]
 
 
 def now_ny() -> dt.datetime:

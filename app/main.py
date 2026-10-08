@@ -21,7 +21,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import build
 from .av import AlphaVantage
-from .engine import DEFAULT_WATCH, Engine
+from .engine import PRESET_WATCH, Engine
 from .store import Store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -64,9 +64,13 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
                                      "cost": float(l["cost"]), "date": str(l["date"])} for l in json.loads(seed)])
             except (ValueError, KeyError, TypeError):
                 log.warning("SEED_LOTS could not be read; starting with no positions")
-        if not store.list_watch():
-            store.replace_watch(DEFAULT_WATCH)
         store.put("seeded", {"at": time.time()})
+    # The watchlist holds only tickers the user adds. Earlier builds started it
+    # with a preset list; remove that list once if it was never changed.
+    if not store.get("watch_manual"):
+        if set(store.list_watch()) == set(PRESET_WATCH):
+            store.replace_watch([])
+        store.put("watch_manual", {"at": time.time()})
 
     @asynccontextmanager
     async def lifespan(_):

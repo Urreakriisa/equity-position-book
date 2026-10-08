@@ -209,3 +209,23 @@ def test_watchlist_prices_and_alerts(client):
     assert {"MU", "STX"} <= {e["ticker"] for e in st3["alertEvents"]}
     assert st3["alerts"]["watchDefault"] > 0 and st3["alerts"]["default"] is None
     assert client.put("/api/alerts", json={"watchDefault": 500}).status_code == 400
+
+
+def test_watchlist_starts_empty_and_preset_is_cleared_once(tmp_path, monkeypatch):
+    from app.engine import PRESET_WATCH
+    monkeypatch.setenv("APP_PASSWORD", "edit-pass")
+    url = f"sqlite:///{tmp_path}/w.db"
+    assert create_app(Store(url), av=None).state.store.list_watch() == []
+
+    # an untouched preset list from an earlier build is removed
+    old = Store(f"sqlite:///{tmp_path}/old.db")
+    old.put("seeded", {"at": 1})
+    old.replace_watch(PRESET_WATCH)
+    assert create_app(old, av=None).state.store.list_watch() == []
+    # but a list the user has edited is left alone, now and on later starts
+    mine = Store(f"sqlite:///{tmp_path}/mine.db")
+    mine.put("seeded", {"at": 1})
+    mine.replace_watch(PRESET_WATCH + ["PLTR"])
+    assert "PLTR" in create_app(mine, av=None).state.store.list_watch()
+    old.replace_watch(PRESET_WATCH)
+    assert len(create_app(old, av=None).state.store.list_watch()) == len(PRESET_WATCH)
