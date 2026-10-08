@@ -127,6 +127,10 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
   #pos th:first-child,#pos td:first-child,#recs td:first-child,#cons td:first-child{position:sticky;left:0;z-index:1;background:var(--surface)} #pos tr.sel td:first-child,#pos tr.lot td:first-child{background:var(--sunk)} .nm{max-width:110px}
   button{padding:9px 13px} .pills button{padding:7px 11px;font-size:13px}
 }
+.alerts{display:flex;flex-direction:column;gap:6px}
+.alerts div{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:9px 14px;font-weight:600;font-size:13.5px}
+.alerts button{border-color:transparent;background:none;color:inherit;padding:2px 8px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 .split{display:flex;gap:2px;height:8px;min-width:120px;border-radius:2px;overflow:hidden}
 .split i{display:block;min-width:2px}
 .wl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
@@ -140,7 +144,7 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
       <h1>Equity Position Book</h1>
       <div class="stamp" id="stamp">Loading portfolio…</div>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap"><button id="editBtn" class="primary" hidden>Edit positions</button><form method="post" action="/logout" style="margin:0"><button type="submit">Sign out</button></form></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button id="alertBtn" hidden>Price alerts</button><button id="editBtn" class="primary" hidden>Edit positions</button><form method="post" action="/logout" style="margin:0"><button type="submit">Sign out</button></form></div>
   </header>
 
   <section class="tape num" id="tape" aria-label="Market indexes"><div><b>MARKET INDEXES</b><span class="lv mut">Loading…</span></div></section>
@@ -152,6 +156,7 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
     <div class="kpi"><h2>Expected 12-month return</h2><div class="v num mut">—</div><div class="s mut">&nbsp;</div></div>
   </section>
 
+  <div id="alerts" class="alerts" role="status" aria-live="polite" hidden></div>
   <div id="banner" class="banner" hidden></div>
 
   <section class="panel">
@@ -190,6 +195,20 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
   <p class="note" id="method"></p>
 </div>
 
+<dialog id="adlg">
+  <form id="aform">
+    <div class="ph"><h2>Price alerts</h2><button type="button" class="ghost" id="aClose">Close</button></div>
+    <div class="pb" style="display:flex;flex-direction:column;gap:12px">
+      <label for="aDef" style="font-weight:600">Alert when any holding moves this much in a day, up or down</label>
+      <div style="display:flex;gap:8px;align-items:center"><input id="aDef" inputmode="decimal" placeholder="Off" style="width:110px"><span class="mut">% (leave empty for no general alert)</span></div>
+      <div class="mut" style="font-size:12.5px">Set a different level for a single holding below. Leave a box empty to use the general level.</div>
+    </div>
+    <div class="scroll" style="max-height:40vh;overflow-y:auto"><table><thead><tr><th>Holding</th><th>Today</th><th>Alert at &plusmn; %</th></tr></thead><tbody id="aRows"></tbody></table></div>
+    <div class="pb note" id="aNote" style="padding-block:10px"></div>
+    <div class="dfoot"><span class="err" id="aErr"></span><button type="button" id="aNotif" hidden>Notify me on this device</button><button class="primary" id="aSave">Save alerts</button></div>
+  </form>
+</dialog>
+
 <dialog id="dlg">
   <form id="dform">
     <div class="ph"><h2>Edit positions</h2><button type="button" class="ghost" id="dClose">Close</button></div>
@@ -200,7 +219,7 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
 </dialog>
 
 <script>
-const S={lots:[],quotes:{},news:[],market:{},watch:{},idx:{},isel:'SPX',live:{},delayed:true,note:'',got:{},sel:null,view:'stock',range:'6M',newsF:'ALL',open:null,canWrite:false};
+const S={lots:[],quotes:{},news:[],market:{},watch:{},idx:{},isel:'SPX',live:{},delayed:true,note:'',alerts:{default:null,by:{}},events:[],got:{},sel:null,view:'stock',range:'6M',newsF:'ALL',open:null,canWrite:false};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nf=(v,d=2)=>v==null||!isFinite(v)?'—':v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -270,6 +289,11 @@ function render(){
       ['Expected 12-month return',pct(T.e12,1),cls(T.e12),e12$!=null?susd(e12$)+' at consensus targets':'No targets loaded']];
     $('kpis').innerHTML=k.map(a=>`<div class="kpi"><h2>${a[0]}</h2><div class="v num ${a[2]}">${pr.length?a[1]:'—'}</div><div class="s mut">${pr.length?a[3]:'&nbsp;'}</div></div>`).join('');
   }
+  // alerts: today's crossings for current holdings
+  const fired=new Map();for(const e of S.events){const q=rows.find(r=>r.t===e.ticker)?.q;if(q&&(q.live?.day||(q.asOf||'').slice(0,10))===e.day)fired.set(e.ticker,e);}
+  const shown=[...fired.values()].filter(e=>!dismissed().includes(e.id));
+  $('alerts').hidden=!shown.length;
+  $('alerts').innerHTML=shown.map(e=>`<div><span>${esc(e.ticker)} moved ${pct(e.pct/100)} today, past your ${nf(e.threshold,1)}% alert. Price ${nf(e.last)} at ${new Date(e.at*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}.</span><button type="button" data-dismiss="${esc(e.id)}">Dismiss</button></div>`).join('');
   const unpriced=rows.filter(r=>r.mv==null).map(r=>r.t);
   $('banner').hidden=!unpriced.length;
   if(unpriced.length)$('banner').textContent=`No market data yet for ${unpriced.join(', ')}. These are left out of the totals until prices load, usually within a couple of minutes. Check the ticker if this message stays.`;
@@ -278,17 +302,18 @@ function render(){
     if(!rows.length)$('pos').innerHTML=`<tbody><tr><td class="empty">No positions yet. ${S.canWrite?'Use Edit positions to add the first lot.':''}</td></tr></tbody>`;
     else{
       if(!S.sel||!rows.some(r=>r.t===S.sel))S.sel=(pr[0]||rows[0]).t;
-      let h=`<thead><tr><th>Holding</th><th>Shares</th><th>Entry price</th><th>Current price</th><th>Day</th><th>Daily P&amp;L</th><th>Accum. P&amp;L</th><th>Accum. %</th><th>Market value</th><th>Weight</th><th>Beta</th><th>12M target price</th><th>12M exp. return</th></tr></thead><tbody>`;
-      for(const r of rows){const q=r.q||{};
+      let h=`<thead><tr><th>Holding</th><th>Current price</th><th>Day %</th><th>Daily P&amp;L</th><th>Accum. P&amp;L</th><th>Accum. %</th><th>Shares</th><th>Entry price</th><th>Market value</th><th>Weight</th><th>Beta</th><th>12M target</th><th>12M exp. return %</th></tr></thead><tbody>`;
+      for(const r of rows){const q=r.q||{},hit=fired.get(r.t);
         h+=`<tr class="pos ${r.t===S.sel?'sel':''}" data-t="${esc(r.t)}" tabindex="0"><td><div class="tk">${esc(r.t)}</div><div class="nm">${esc(q.name||'Awaiting market data')}</div></td>
-        <td class="num">${nf(r.qty,0)}</td><td class="num">${nf(r.avg)}</td><td class="num">${nf(q.last)}</td>
-        <td><span class="chip ${cls(r.dayPct)}">${pct(r.dayPct)}</span></td>
+        <td class="num">${nf(q.last)}</td>
+        <td><span class="chip ${cls(r.dayPct)}"${hit?` title="Crossed your ${nf(hit.threshold,1)}% alert"`:''}>${hit?'<span aria-hidden="true">&#9679; </span><span class="sr">Alert: </span>':''}${pct(r.dayPct)}</span></td>
         <td class="num ${cls(r.day)}">${susd(r.day)}</td><td class="num ${cls(r.pl)}">${susd(r.pl)}</td><td class="num ${cls(r.pl)}">${pct(r.mv!=null?r.pl/r.cost:null)}</td>
+        <td class="num">${nf(r.qty,0)}</td><td class="num">${nf(r.avg)}</td>
         <td class="num">${usd(r.mv)}</td><td class="num">${r.w!=null?(r.w*100).toFixed(1)+'%':'—'}</td><td class="num">${nf(q.beta5y)}</td><td class="num">${nf(q.target?.avg)}</td><td class="num ${cls(r.up)}">${pct(r.up,1)}</td></tr>`;
         if(S.open===r.t)for(const l of r.lots){const lp=q.last!=null?l.qty*(q.last-l.cost):null;
-          h+=`<tr class="lot"><td>Lot bought ${esc(l.date||'')}</td><td class="num">${nf(l.qty,0)}</td><td class="num">${nf(l.cost)}</td><td></td><td></td><td></td><td class="num ${cls(lp)}">${susd(lp)}</td><td class="num ${cls(lp)}">${pct(lp!=null?lp/(l.qty*l.cost):null)}</td><td class="num">${usd(q.last!=null?l.qty*q.last:null)}</td><td></td><td></td><td></td><td></td></tr>`;}
+          h+=`<tr class="lot"><td>Lot bought ${esc(l.date||'')}</td><td></td><td></td><td></td><td class="num ${cls(lp)}">${susd(lp)}</td><td class="num ${cls(lp)}">${pct(lp!=null?lp/(l.qty*l.cost):null)}</td><td class="num">${nf(l.qty,0)}</td><td class="num">${nf(l.cost)}</td><td class="num">${usd(q.last!=null?l.qty*q.last:null)}</td><td></td><td></td><td></td><td></td></tr>`;}
       }
-      h+=`</tbody><tfoot><tr><td>Total</td><td></td><td></td><td></td><td><span class="chip ${cls(T.day)}">${pct(T.day/(T.mv-T.day))}</span></td><td class="num ${cls(T.day)}">${susd(T.day)}</td><td class="num ${cls(T.pl)}">${susd(T.pl)}</td><td class="num ${cls(T.pl)}">${pct(T.pl/T.cost)}</td><td class="num">${usd(T.mv)}</td><td class="num">100%</td><td class="num">${nf(T.beta5)}</td><td></td><td class="num ${cls(T.e12)}">${pct(T.e12,1)}</td></tr></tfoot>`;
+      h+=`</tbody><tfoot><tr><td>Total</td><td></td><td><span class="chip ${cls(T.day)}">${pct(T.day/(T.mv-T.day))}</span></td><td class="num ${cls(T.day)}">${susd(T.day)}</td><td class="num ${cls(T.pl)}">${susd(T.pl)}</td><td class="num ${cls(T.pl)}">${pct(T.pl/T.cost)}</td><td></td><td></td><td class="num">${usd(T.mv)}</td><td class="num">100%</td><td class="num">${nf(T.beta5)}</td><td></td><td class="num ${cls(T.e12)}">${pct(T.e12,1)}</td></tr></tfoot>`;
       $('pos').innerHTML=h;
     }
   }
@@ -395,7 +420,7 @@ function drawChart(M){
   svg.addEventListener('pointerleave',()=>{tip.hidden=true;xh.setAttribute('visibility','hidden');});
 }
 
-const RNG={'3M':63,'6M':126,'1Y':252};
+const RNG={'1M':21,'3M':63,'6M':126,'1Y':252,'3Y':756};
 function sma(c,n){const o=new Array(c.length).fill(null);let s=0;for(let i=0;i<c.length;i++){s+=c[i];if(i>=n)s-=c[i-n];if(i>=n-1)o[i]=s/n;}return o;}
 function fitLine(p){const n=p.length,mx=sum(p,q=>q.i)/n,my=sum(p,q=>q.y)/n;let sxx=0,sxy=0;for(const q of p){sxx+=(q.i-mx)**2;sxy+=(q.i-mx)*(q.y-my);}
   const m=sxx?sxy/sxx:0,b=my-m*mx;return{m,at:i=>m*i+b,res:Math.max(...p.map(q=>Math.abs(q.y-(m*q.i+b))))};}
@@ -533,6 +558,33 @@ $('dform').addEventListener('submit',async e=>{e.preventDefault();readDraft();co
   }catch(x){err.textContent=x.message||'Could not save. Try again in a moment.';}
   $('dSave').disabled=false;});
 
+// price alerts
+const LS={get(k){try{return JSON.parse(localStorage.getItem(k)||'[]');}catch(e){return [];}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v.slice(-200)));}catch(e){}}};
+const dismissed=()=>LS.get('epb_dismissed');
+$('alerts').addEventListener('click',e=>{const b=e.target.closest('[data-dismiss]');if(!b)return;LS.set('epb_dismissed',[...dismissed(),b.dataset.dismiss]);render();});
+function announce(){   // a system notification for crossings this device has not seen yet
+  const seen=LS.get('epb_seen'),fresh=S.events.filter(e=>!seen.includes(e.id)&&Date.now()/1000-e.at<6*3600);
+  if(!fresh.length)return;LS.set('epb_seen',[...seen,...fresh.map(e=>e.id)]);
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  for(const e of fresh){try{new Notification(`${e.ticker} ${pct(e.pct/100)} today`,{body:`Past your ${nf(e.threshold,1)}% alert. Price ${nf(e.last)}.`,tag:e.id,icon:'/static/icon-192.png'});}catch(x){}}
+}
+function notifState(){const b=$('aNotif'),ok='Notification' in window;b.hidden=!ok||Notification.permission!=='default';
+  $('aNote').textContent='Alerts are checked each time prices refresh and show at the top of this page for everyone who signs in. '+(!ok?'This browser cannot show system notifications, so alerts appear only inside the app.':Notification.permission==='granted'?'This device also gets a system notification while the app is open in a tab or window.':Notification.permission==='denied'?'System notifications are blocked for this site in your browser settings.':'Choose "Notify me on this device" to also get a system notification while the app is open.');}
+$('aNotif').addEventListener('click',async()=>{try{await Notification.requestPermission();}catch(x){}notifState();});
+$('alertBtn').addEventListener('click',()=>{const M=model();$('aErr').textContent='';$('aDef').value=S.alerts.default??'';
+  $('aRows').innerHTML=M.rows.map((r,i)=>`<tr><td><span class="tk">${esc(r.t)}</span></td><td class="num ${cls(r.dayPct)}">${pct(r.dayPct)}</td><td><input id="a${i}" data-t="${esc(r.t)}" aria-label="Alert level for ${esc(r.t)}" inputmode="decimal" placeholder="${S.alerts.default!=null?'General: '+S.alerts.default+'%':'Off'}" value="${esc(S.alerts.by?.[r.t]??'')}" style="width:130px"></td></tr>`).join('');
+  notifState();$('adlg').showModal();});
+$('aClose').addEventListener('click',()=>$('adlg').close());
+$('aform').addEventListener('submit',async e=>{e.preventDefault();const err=$('aErr');err.textContent='';
+  const num=v=>{v=String(v).trim().replace('%','');if(v==='')return null;const x=+v;return x>0&&x<=100?x:NaN;};
+  const def=num($('aDef').value),by={};
+  for(const inp of $('aRows').querySelectorAll('input')){const v=num(inp.value);if(Number.isNaN(v)){err.textContent='Alert levels are percentages between 0 and 100.';return;}if(v!=null)by[inp.dataset.t]=v;}
+  if(Number.isNaN(def)){err.textContent='Alert levels are percentages between 0 and 100.';return;}
+  $('aSave').disabled=true;
+  try{apply(await api('/api/alerts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({default:def,by})}));$('adlg').close();}
+  catch(x){err.textContent=x.message||'Could not save.';}
+  $('aSave').disabled=false;});
+
 // watchlist
 $('wlBtn').addEventListener('click',()=>{const f=$('wlForm');f.hidden=!f.hidden;if(!f.hidden){$('wlIn').value=(S.watchList||[]).join(', ');$('wlErr').textContent='';$('wlIn').focus();}});
 $('wlForm').addEventListener('submit',async e=>{e.preventDefault();$('wlErr').textContent='';$('wlSave').disabled=true;
@@ -551,13 +603,13 @@ async function api(path,opt){
   return body;
 }
 function apply(st){
-  S.lots=st.lots||[];S.canWrite=!!st.canWrite;S.live=st.live||{};S.news=st.news||[];S.watch=st.watch||{};S.watchList=st.watchlist||[];S.delayed=st.delayed!==false;
+  S.lots=st.lots||[];S.canWrite=!!st.canWrite;S.live=st.live||{};S.news=st.news||[];S.watch=st.watch||{};S.watchList=st.watchlist||[];S.delayed=st.delayed!==false;S.alerts=st.alerts||{default:null,by:{}};S.events=st.alertEvents||[];
   S.quotes={};for(const [k,v] of Object.entries(st.quotes||{}))S.quotes[k]={...v,hist:H[k]};
   S.idx={};for(const [k,v] of Object.entries(st.idx||{}))S.idx[k]={...v,hist:H[v.etf]};
   S.market={...st.market,bench:H.SPY?{SPY:{d:H.SPY.d,c:H.SPY.c}}:null};
   S.note=!st.configured?'Market data is off: add ALPHAVANTAGE_API_KEY to the app\'s settings.':'';
   S.got.lots=true;S.got.news=true;
-  $('editBtn').hidden=!S.canWrite;$('wlBtn').hidden=!S.canWrite;
+  $('editBtn').hidden=!S.canWrite;$('wlBtn').hidden=!S.canWrite;$('alertBtn').hidden=!S.canWrite;announce();
   render();
 }
 async function tick(){
@@ -572,7 +624,7 @@ async function tick(){
   }catch(e){if(!S.got.lots)$('stamp').textContent='Could not reach the server. Retrying.';}
 }
 render();tick();
-setInterval(()=>{if(!document.hidden&&!$('dlg').open)tick();},20000);
+setInterval(()=>{if(!document.hidden&&!$('dlg').open&&!$('adlg').open)tick();},20000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick();});
 if('serviceWorker' in navigator)navigator.serviceWorker.getRegistrations().then(rs=>rs.forEach(r=>r.unregister())).catch(()=>{});
 </script>

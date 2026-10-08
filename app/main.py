@@ -212,6 +212,39 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
         await asyncio.to_thread(store.replace_watch, tickers)
         return await asyncio.to_thread(engine.state, True)
 
+    @app.put("/api/alerts")
+    async def put_alerts(request: Request):
+        need(request, edit=True)
+        body = await json_body(request)
+
+        def level(v):
+            if v is None or v == "":
+                return None
+            try:
+                x = float(v)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Alert levels are percentages between 0 and 100") from None
+            if not (0 < x <= 100):
+                raise HTTPException(400, "Alert levels are percentages between 0 and 100")
+            return x
+
+        raw = body.get("by") or {}
+        if not isinstance(raw, dict) or len(raw) > MAX_LOTS:
+            raise HTTPException(400, "Send alert levels by ticker")
+        by = {}
+        for t, v in raw.items():
+            t = str(t).strip().upper()
+            if not TICKER.match(t):
+                raise HTTPException(400, f"Not a ticker: {t[:12]}")
+            if (x := level(v)) is not None:
+                by[t] = x
+        await asyncio.to_thread(engine.set_alerts, level(body.get("default")), by)
+        # Check the new levels against the prices already loaded.
+        for sym in await asyncio.to_thread(engine.held):
+            if (q := store.get(f"quote:{sym}")):
+                await asyncio.to_thread(engine._check_alert, sym, q)
+        return await asyncio.to_thread(engine.state, True)
+
     @app.exception_handler(HTTPException)
     async def http_error(_, exc: HTTPException):
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)

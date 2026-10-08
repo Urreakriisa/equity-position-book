@@ -153,3 +153,38 @@ def test_login_lockout(client):
     for _ in range(8):
         assert client.post("/login", data={"password": "x"}).status_code == 401
     assert client.post("/login", data={"password": "edit-pass"}).status_code == 429
+
+
+def test_price_alerts(client):
+    client.post("/login", data={"password": "edit-pass"})
+    held = sorted({l["ticker"] for l in client.get("/api/state").json()["lots"]})
+    load(client.engine, held)
+    st = client.get("/api/state").json()
+    moves = {t: (st["live"][t]["last"] / st["live"][t]["prevClose"] - 1) * 100 for t in held}
+    big = max(held, key=lambda t: abs(moves[t]))
+    small = min(held, key=lambda t: abs(moves[t]))
+    assert st["alerts"] == {"default": None, "by": {}} and st["alertEvents"] == []
+
+    # a general level just under the biggest move: only holdings past it fire
+    level = round(abs(moves[big]) - 0.01, 2)
+    st = client.put("/api/alerts", json={"default": level, "by": {small: 99}}).json()
+    fired = {e["ticker"]: e for e in st["alertEvents"]}
+    assert big in fired and small not in fired
+    assert all(abs(moves[t]) >= level for t in fired)
+    assert fired[big]["threshold"] == level and abs(fired[big]["pct"] - moves[big]) < 0.01
+
+    # the same crossing is not recorded twice on the next price refresh
+    load(client.engine, held)
+    again = client.get("/api/state").json()["alertEvents"]
+    assert len(again) == len(st["alertEvents"])
+
+    # a per-holding level overrides the general one
+    st = client.put("/api/alerts", json={"default": None, "by": {small: 0.0001}}).json()
+    assert st["alerts"] == {"default": None, "by": {small: 0.0001}}
+    assert small in {e["ticker"] for e in st["alertEvents"]}
+
+    for bad in ({"default": -1}, {"default": "abc"}, {"default": 150}, {"by": {"<x>": 2}}, {"by": [1]}):
+        assert client.put("/api/alerts", json=bad).status_code == 400
+    client.post("/logout")
+    client.post("/login", data={"password": "view-pass"})
+    assert client.put("/api/alerts", json={"default": 2}).status_code == 403

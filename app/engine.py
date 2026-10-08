@@ -142,7 +142,36 @@ class Engine:
             log.warning("%s failed: %s", key, e)
 
     async def _load_quote(self, sym):
-        return await self.av.quote(sym)
+        q = await self.av.quote(sym)
+        await asyncio.to_thread(self._check_alert, sym, q)
+        return q
+
+    # ---- price alerts ------------------------------------------------------
+    def alerts(self) -> dict:
+        a = self.store.get("alerts") or {}
+        return {"default": a.get("default"), "by": a.get("by") or {}}
+
+    def set_alerts(self, default: float | None, by: dict[str, float]) -> None:
+        self.store.put("alerts", {"default": default, "by": by})
+
+    def _check_alert(self, sym: str, q: dict) -> None:
+        """Record the first time a holding's move for the day reaches its alert
+        level. One event per holding, per trading day, per level."""
+        cfg = self.alerts()
+        level = cfg["by"].get(sym, cfg["default"])
+        if not level or sym not in self.held():
+            return
+        move = (q["last"] / q["prevClose"] - 1) * 100
+        if abs(move) < level:
+            return
+        events = (self.store.get("alert_events") or {}).get("items", [])
+        eid = f'{sym}-{q["day"]}-{level:g}'
+        if any(e["id"] == eid for e in events):
+            return
+        events.append({"id": eid, "ticker": sym, "day": q["day"], "pct": round(move, 2),
+                       "threshold": level, "last": q["last"], "at": time.time()})
+        self.store.put("alert_events", {"items": events[-100:]})
+        log.info("alert: %s moved %.2f%% (level %s%%)", sym, move, level)
 
     async def _load_overview(self, sym):
         return await self.av.overview(sym)
@@ -246,6 +275,9 @@ class Engine:
             "market": {"indexes": {"list": tape},
                        "rates": {"tbill3m": rates.get("tbill3m"), "asOf": rates.get("asOf")},
                        "meta": {"updated": max(stamps) if stamps else None}},
+            "alerts": self.alerts(),
+            "alertEvents": [e for e in (self.store.get("alert_events") or {}).get("items", [])
+                            if e["ticker"] in held][-30:],
             "canWrite": can_write, "delayed": self.delayed, "histVersion": version,
             "configured": self.av is not None, "error": self.last_error,
         }
