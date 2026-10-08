@@ -165,7 +165,7 @@ def test_price_alerts(client):
     moves = {t: (st["live"][t]["last"] / st["live"][t]["prevClose"] - 1) * 100 for t in held}
     big = max(held, key=lambda t: abs(moves[t]))
     small = min(held, key=lambda t: abs(moves[t]))
-    assert st["alerts"] == {"default": None, "by": {}} and st["alertEvents"] == []
+    assert st["alerts"] == {"default": None, "watchDefault": None, "by": {}} and st["alertEvents"] == []
 
     # a general level just under the biggest move: only holdings past it fire
     level = round(abs(moves[big]) - 0.01, 2)
@@ -182,7 +182,7 @@ def test_price_alerts(client):
 
     # a per-holding level overrides the general one
     st = client.put("/api/alerts", json={"default": None, "by": {small: 0.0001}}).json()
-    assert st["alerts"] == {"default": None, "by": {small: 0.0001}}
+    assert st["alerts"] == {"default": None, "watchDefault": None, "by": {small: 0.0001}}
     assert small in {e["ticker"] for e in st["alertEvents"]}
 
     for bad in ({"default": -1}, {"default": "abc"}, {"default": 150}, {"by": {"<x>": 2}}, {"by": [1]}):
@@ -190,3 +190,22 @@ def test_price_alerts(client):
     client.post("/logout")
     client.post("/login", data={"password": "view-pass"})
     assert client.put("/api/alerts", json={"default": 2}).status_code == 403
+
+
+def test_watchlist_prices_and_alerts(client):
+    client.post("/login", data={"password": "edit-pass"})
+    st = client.put("/api/watchlist", json={"tickers": ["MU", "STX", "NVDA"]}).json()
+    assert st["watchlist"] == ["MU", "NVDA", "STX"] and st["watch"] == {}
+    load(client.engine, ["MU", "STX"])
+    st = client.get("/api/state").json()
+    assert set(st["watch"]) >= {"MU", "STX"} and st["watch"]["MU"]["prevClose"] > 0 and "MU" in st["live"]
+    assert {"MU", "STX"} <= set(client.get("/api/history").json())
+    move = lambda t: abs(st["live"][t]["last"] / st["live"][t]["prevClose"] - 1) * 100
+
+    # the holdings level does not apply to the watchlist; the watchlist level does
+    st2 = client.put("/api/alerts", json={"default": 0.0001}).json()
+    assert not {"MU", "STX"} & {e["ticker"] for e in st2["alertEvents"]}
+    st3 = client.put("/api/alerts", json={"watchDefault": round(min(move("MU"), move("STX")) - 0.001, 3)}).json()
+    assert {"MU", "STX"} <= {e["ticker"] for e in st3["alertEvents"]}
+    assert st3["alerts"]["watchDefault"] > 0 and st3["alerts"]["default"] is None
+    assert client.put("/api/alerts", json={"watchDefault": 500}).status_code == 400

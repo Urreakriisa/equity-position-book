@@ -210,7 +210,9 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
         bad = [t for t in tickers if not TICKER.match(t)]
         if bad:
             raise HTTPException(400, f"Not a ticker: {bad[0][:12]}")
+        before = set(await asyncio.to_thread(store.list_watch))
         await asyncio.to_thread(store.replace_watch, tickers)
+        engine.kick([t for t in tickers if t not in before])
         return await asyncio.to_thread(engine.state, True)
 
     @app.put("/api/alerts")
@@ -239,9 +241,9 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
                 raise HTTPException(400, f"Not a ticker: {t[:12]}")
             if (x := level(v)) is not None:
                 by[t] = x
-        await asyncio.to_thread(engine.set_alerts, level(body.get("default")), by)
+        await asyncio.to_thread(engine.set_alerts, level(body.get("default")), level(body.get("watchDefault")), by)
         # Check the new levels against the prices already loaded.
-        for sym in await asyncio.to_thread(engine.held):
+        for sym in await asyncio.to_thread(lambda: engine.held() + engine.watchlist()):
             if (q := store.get(f"quote:{sym}")):
                 await asyncio.to_thread(engine._check_alert, sym, q)
         return await asyncio.to_thread(engine.state, True)

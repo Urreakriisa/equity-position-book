@@ -2,7 +2,7 @@
 import os
 import time
 
-BUILD = 3
+BUILD = 4
 COMMIT = (os.environ.get("RAILWAY_GIT_COMMIT_SHA") or "")[:7]
 STARTED = time.time()
 

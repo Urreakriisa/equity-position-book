@@ -94,7 +94,7 @@ class Engine:
     async def _quote_loop(self):
         while True:
             try:
-                symbols = await asyncio.to_thread(lambda: self.held() + self.etfs())
+                symbols = await asyncio.to_thread(lambda: self.held() + self.etfs() + self.watchlist())
                 await asyncio.gather(*(self._fresh("quote", s, 0, self._load_quote) for s in dict.fromkeys(symbols)))
             except asyncio.CancelledError:
                 raise
@@ -106,13 +106,10 @@ class Engine:
         while True:
             try:
                 held, watch = await asyncio.to_thread(self.held), await asyncio.to_thread(self.watchlist)
-                for s in dict.fromkeys(held + self.etfs()):
+                for s in dict.fromkeys(held + self.etfs() + watch):
                     await self._ensure_history(s)
                 for s in dict.fromkeys(held + watch):
                     await self._fresh("ov", s, 24 * 3600, self._load_overview)
-                for s in watch:
-                    if s not in held:
-                        await self._fresh("quote", s, 900 if market_open() else 3600, self._load_quote)
                 for s in held:
                     await self._fresh("news", s, 3600, self._load_news)
                 await self._fresh("rates", "", 12 * 3600, self._load_rates)
@@ -150,17 +147,24 @@ class Engine:
     # ---- price alerts ------------------------------------------------------
     def alerts(self) -> dict:
         a = self.store.get("alerts") or {}
-        return {"default": a.get("default"), "by": a.get("by") or {}}
+        return {"default": a.get("default"), "watchDefault": a.get("watchDefault"), "by": a.get("by") or {}}
 
-    def set_alerts(self, default: float | None, by: dict[str, float]) -> None:
-        self.store.put("alerts", {"default": default, "by": by})
+    def set_alerts(self, default: float | None, watch_default: float | None, by: dict[str, float]) -> None:
+        self.store.put("alerts", {"default": default, "watchDefault": watch_default, "by": by})
 
     def _check_alert(self, sym: str, q: dict) -> None:
-        """Record the first time a holding's move for the day reaches its alert
-        level. One event per holding, per trading day, per level."""
+        """Record the first time a stock's move for the day reaches its alert
+        level. One event per stock, per trading day, per level. A stock's own
+        level wins; otherwise holdings and watchlist names each have a general one."""
         cfg = self.alerts()
-        level = cfg["by"].get(sym, cfg["default"])
-        if not level or sym not in self.held():
+        if sym in self.held():
+            general = cfg["default"]
+        elif sym in self.watchlist():
+            general = cfg["watchDefault"]
+        else:
+            return
+        level = cfg["by"].get(sym, general)
+        if not level:
             return
         move = (q["last"] / q["prevClose"] - 1) * 100
         if abs(move) < level:
@@ -259,26 +263,30 @@ class Engine:
             tape.append({"sym": code, "name": f"{name} ({etf})", "last": view["last"],
                          "chgPct": round((view["last"] / view["prevClose"] - 1) * 100, 2),
                          "asOf": view["asOf"][5:]})
-        watch = {}
-        for s in self.watchlist():
+        watch, watchlist = {}, self.watchlist()
+        for s in watchlist:
             ov, view = self.store.get(f"ov:{s}") or {}, self._quote_view(s)
-            if view and (ov.get("target") or {}).get("avg"):
-                watch[s] = {"name": ov.get("name") or s, "last": view["last"], "asOf": view["asOf"],
-                            "target": ov["target"], "beta5y": ov.get("beta5y"), "ma200": ov.get("ma200")}
+            if not view:
+                continue
+            closes = [r[4] for r in (self.store.get(f"hist:{s}") or {}).get("rows", [])]
+            watch[s] = {**view, "name": ov.get("name") or s, "target": ov.get("target"),
+                        "beta5y": ov.get("beta5y"), "ma200": sma(closes, 200) or ov.get("ma200")}
+            if s not in live and (lv := self._live(s)):
+                live[s] = lv
         rates = self.store.get("rates") or {}
         stamps = [v["at"] for v in live.values()]
         version = hashlib.sha1("|".join(
-            f'{s}:{len(r)}:{r[-1][0] if r else ""}' for s in held + self.etfs()
+            f'{s}:{len(r)}:{r[-1][0] if r else ""}' for s in dict.fromkeys(held + self.etfs() + watchlist)
             for r in [(self.store.get(f"hist:{s}") or {}).get("rows", [])]).encode()).hexdigest()[:12]
         return {
             "lots": lots, "quotes": quotes, "live": live, "idx": idx, "watch": watch,
-            "watchlist": self.watchlist(), "news": news,
+            "watchlist": watchlist, "news": news,
             "market": {"indexes": {"list": tape},
                        "rates": {"tbill3m": rates.get("tbill3m"), "asOf": rates.get("asOf")},
                        "meta": {"updated": max(stamps) if stamps else None}},
             "alerts": self.alerts(),
             "alertEvents": [e for e in (self.store.get("alert_events") or {}).get("items", [])
-                            if e["ticker"] in held][-30:],
+                            if e["ticker"] in held or e["ticker"] in watchlist][-30:],
             "canWrite": can_write, "delayed": self.delayed, "histVersion": version,
             "configured": self.av is not None, "error": self.last_error,
             "build": build.info(),
@@ -286,7 +294,7 @@ class Engine:
 
     def history(self) -> dict:
         out = {}
-        for s in dict.fromkeys(self.held() + self.etfs()):
+        for s in dict.fromkeys(self.held() + self.etfs() + self.watchlist()):
             rows = (self.store.get(f"hist:{s}") or {}).get("rows") or []
             if rows:
                 out[s] = {"d": [r[0] for r in rows], "o": [r[1] for r in rows], "h": [r[2] for r in rows],

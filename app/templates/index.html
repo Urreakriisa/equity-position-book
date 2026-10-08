@@ -164,6 +164,12 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
     <div class="scroll"><table id="pos"><tbody><tr><td class="empty">Positions appear here once the portfolio loads.</td></tr></tbody></table></div>
   </section>
 
+  <section class="panel">
+    <div class="ph"><h2>Watchlist</h2><span class="mut" style="font-size:12px">Stocks you follow but do not hold. Select a row to chart it</span><button type="button" id="wlBtn" hidden>Edit watchlist</button></div>
+    <form class="wl" id="wlForm" hidden><label for="wlIn" class="mut" style="font-size:12.5px">Watchlist tickers, separated by commas</label><input id="wlIn" autocomplete="off" autocapitalize="characters" spellcheck="false"><button class="primary" id="wlSave">Save watchlist</button><span class="err" id="wlErr"></span></form>
+    <div class="scroll"><table id="watchT"><tbody><tr><td class="empty">The watchlist loads with the market data.</td></tr></tbody></table></div>
+  </section>
+
   <div class="two">
     <section class="panel">
       <div class="ph"><h2>Price chart</h2><div class="pills" id="pills"></div></div>
@@ -181,8 +187,7 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
   </section>
 
   <section class="panel">
-    <div class="ph"><h2>Suggested changes</h2><span class="mut" style="font-size:12px">A rule-based screen on Street consensus, beta, weight and trend. Not investment advice.</span><button type="button" id="wlBtn" hidden>Edit watchlist</button></div>
-    <form class="wl" id="wlForm" hidden><label for="wlIn" class="mut" style="font-size:12.5px">Watchlist tickers, separated by commas</label><input id="wlIn" autocomplete="off" autocapitalize="characters" spellcheck="false"><button class="primary" id="wlSave">Save watchlist</button><span class="err" id="wlErr"></span></form>
+    <div class="ph"><h2>Suggested changes</h2><span class="mut" style="font-size:12px">A rule-based screen on Street consensus, beta, weight and trend. Not investment advice.</span></div>
     <div class="scroll"><table id="recs"><tbody><tr><td class="empty">Suggestions load with the market data.</td></tr></tbody></table></div>
     <p class="note" id="recNote" style="margin:0;padding:12px 16px"></p>
   </section>
@@ -202,9 +207,11 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
     <div class="pb" style="display:flex;flex-direction:column;gap:12px">
       <label for="aDef" style="font-weight:600">Alert when any holding moves this much in a day, up or down</label>
       <div style="display:flex;gap:8px;align-items:center"><input id="aDef" inputmode="decimal" placeholder="Off" style="width:110px"><span class="mut">% (leave empty for no general alert)</span></div>
-      <div class="mut" style="font-size:12.5px">Set a different level for a single holding below. Leave a box empty to use the general level.</div>
+      <label for="aWDef" style="font-weight:600">Alert when any watchlist stock moves this much in a day</label>
+      <div style="display:flex;gap:8px;align-items:center"><input id="aWDef" inputmode="decimal" placeholder="Off" style="width:110px"><span class="mut">% (leave empty for no general alert)</span></div>
+      <div class="mut" style="font-size:12.5px">Set a different level for a single stock below. Leave a box empty to use the general level.</div>
     </div>
-    <div class="scroll" style="max-height:40vh;overflow-y:auto"><table><thead><tr><th>Holding</th><th>Today</th><th>Alert at &plusmn; %</th></tr></thead><tbody id="aRows"></tbody></table></div>
+    <div class="scroll" style="max-height:40vh;overflow-y:auto"><table><thead><tr><th>Stock</th><th>Today</th><th>Alert at &plusmn; %</th></tr></thead><tbody id="aRows"></tbody></table></div>
     <div class="pb note" id="aNote" style="padding-block:10px"></div>
     <div class="dfoot"><span class="err" id="aErr"></span><button type="button" id="aNotif" hidden>Notify me on this device</button><button class="primary" id="aSave">Save alerts</button></div>
   </form>
@@ -220,7 +227,7 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
 </dialog>
 
 <script>
-const S={lots:[],quotes:{},news:[],market:{},watch:{},idx:{},isel:'SPX',live:{},delayed:true,note:'',alerts:{default:null,by:{}},events:[],got:{},sel:null,view:'stock',range:'6M',newsF:'ALL',open:null,canWrite:false};
+const S={lots:[],quotes:{},news:[],market:{},watch:{},idx:{},isel:'SPX',live:{},delayed:true,note:'',alerts:{default:null,watchDefault:null,by:{}},events:[],wsel:null,got:{},sel:null,view:'stock',range:'6M',newsF:'ALL',open:null,canWrite:false};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nf=(v,d=2)=>v==null||!isFinite(v)?'—':v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -273,6 +280,11 @@ function stats(pr){
   return {dates,n,beta:cv/vm,vol,sharpe:(mp*252-rf)/vol,rf,ip,im,ret:ip[n]/100-1,mret:im[n]/100-1,corr:cv/Math.sqrt(vp*vm)};
 }
 
+function watchRows(){
+  const held=new Set(S.lots.map(l=>l.ticker));
+  return (S.watchList||[]).filter(t=>!held.has(t)).map(t=>{const q0=S.watch[t],lv=S.live[t],q=q0&&lv?{...q0,last:lv.last,prevClose:lv.prevClose,asOf:lv.day+' live',live:lv}:q0;
+    return {t,q,dayPct:q?.prevClose?q.last/q.prevClose-1:null,up:q?.target?.avg?q.target.avg/q.last-1:null};});
+}
 function render(){
   const M=model(),{rows,pr,T,st}=M;const meta=S.market.meta||{};
   const loaded=S.got.lots;
@@ -291,10 +303,10 @@ function render(){
     $('kpis').innerHTML=k.map(a=>`<div class="kpi"><h2>${a[0]}</h2><div class="v num ${a[2]}">${pr.length?a[1]:'—'}</div><div class="s mut">${pr.length?a[3]:'&nbsp;'}</div></div>`).join('');
   }
   // alerts: today's crossings for current holdings
-  const fired=new Map();for(const e of S.events){const q=rows.find(r=>r.t===e.ticker)?.q;if(q&&(q.live?.day||(q.asOf||'').slice(0,10))===e.day)fired.set(e.ticker,e);}
+  const WR=watchRows(),fired=new Map();for(const e of S.events){const q=(rows.find(r=>r.t===e.ticker)||WR.find(r=>r.t===e.ticker))?.q;if(q&&(q.live?.day||(q.asOf||'').slice(0,10))===e.day)fired.set(e.ticker,e);}
   const shown=[...fired.values()].filter(e=>!dismissed().includes(e.id));
   $('alerts').hidden=!shown.length;
-  $('alerts').innerHTML=shown.map(e=>`<div><span>${esc(e.ticker)} moved ${pct(e.pct/100)} today, past your ${nf(e.threshold,1)}% alert. Price ${nf(e.last)} at ${new Date(e.at*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}.</span><button type="button" data-dismiss="${esc(e.id)}">Dismiss</button></div>`).join('');
+  $('alerts').innerHTML=shown.map(e=>`<div><span>${esc(e.ticker)} moved ${pct(e.pct/100)} today, past your ${nf(e.threshold,1)}% alert${WR.some(r=>r.t===e.ticker)?' (watchlist)':''}. Price ${nf(e.last)} at ${new Date(e.at*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}.</span><button type="button" data-dismiss="${esc(e.id)}">Dismiss</button></div>`).join('');
   const unpriced=rows.filter(r=>r.mv==null).map(r=>r.t);
   $('banner').hidden=!unpriced.length;
   if(unpriced.length)$('banner').textContent=`No market data yet for ${unpriced.join(', ')}. These are left out of the totals until prices load, usually within a couple of minutes. Check the ticker if this message stays.`;
@@ -318,9 +330,19 @@ function render(){
       $('pos').innerHTML=h;
     }
   }
+  // watchlist
+  if(loaded){
+    const lvl=t=>S.alerts.by?.[t]??S.alerts.watchDefault;
+    $('watchT').innerHTML=WR.length?`<thead><tr><th>Stock</th><th>Current price</th><th>Day %</th><th>12M target</th><th>12M exp. return %</th><th>Beta</th><th style="text-align:left">Consensus</th><th>Alert at</th></tr></thead><tbody>`+
+      WR.map(r=>{const q=r.q||{},hit=fired.get(r.t),a=lvl(r.t);
+        return `<tr class="pos ${S.view==='watch'&&S.wsel===r.t?'sel':''}" data-t="${esc(r.t)}" tabindex="0"><td><div class="tk">${esc(r.t)}</div><div class="nm">${esc(q.name||'Awaiting market data')}</div></td>
+        <td class="num">${nf(q.last)}</td><td><span class="chip ${cls(r.dayPct)}"${hit?` title="Crossed your ${nf(hit.threshold,1)}% alert"`:''}>${hit?'<span aria-hidden="true">&#9679; </span><span class="sr">Alert: </span>':''}${pct(r.dayPct)}</span></td>
+        <td class="num">${nf(q.target?.avg)}</td><td class="num ${cls(r.up)}">${pct(r.up,1)}</td><td class="num">${nf(q.beta5y)}</td><td style="text-align:left">${esc(q.target?.rating||'—')}</td><td class="num ${a?'':'mut'}">${a?'±'+nf(a,a%1?2:0)+'%':'Off'}</td></tr>`;}).join('')+'</tbody>'
+      :`<tbody><tr><td class="empty">No stocks on the watchlist. ${S.canWrite?'Use Edit watchlist to add some.':''}</td></tr></tbody>`;
+  }
   // pills + chart
-  const ixs=['SPX','DJI','IXIC'].filter(k=>S.idx[k]?.hist),cur=S.view==='port'?'__P':S.view==='idx'?'__I'+S.isel:S.sel;
-  $('pills').innerHTML=pr.length?[['__P','Portfolio vs S&P 500'],...pr.map(r=>[r.t,r.t]),...ixs.map(k=>['__I'+k,S.idx[k].name])].map(([k,l])=>`<button type="button" data-k="${esc(k)}" aria-pressed="${cur===k}">${esc(l)}</button>`).join(''):'';
+  const ixs=['SPX','DJI','IXIC'].filter(k=>S.idx[k]?.hist),cur=S.view==='port'?'__P':S.view==='idx'?'__I'+S.isel:S.view==='watch'?'__W':S.sel;
+  $('pills').innerHTML=pr.length?[['__P','Portfolio vs S&P 500'],...pr.map(r=>[r.t,r.t]),...ixs.map(k=>['__I'+k,S.idx[k].name]),...(S.view==='watch'&&S.wsel?[['__W',S.wsel+' · watchlist']]:[])].map(([k,l])=>`<button type="button" data-k="${esc(k)}" aria-pressed="${cur===k}">${esc(l)}</button>`).join(''):'';
   drawChart(M);
   // risk
   if(pr.length){
@@ -390,6 +412,10 @@ function drawChart(M){
     ref={y:100,label:'100'};fy=v=>nf(v,1);
     hd.innerHTML=`<span class="big num">${pct(M.st.ret,1)}</span><span class="mut">portfolio vs ${pct(M.st.mret,1)} for SPY, last ${M.st.n} trading days, both indexed to 100</span><div class="legend" style="flex-basis:100%">${series.map(s=>`<span><i style="background:${s.color}"></i>${s.name}</span>`).join('')}</div>`;
     $('ta').innerHTML='';
+  }else if(S.view==='watch'){
+    const w=watchRows().find(x=>x.t===S.wsel);
+    if(!w||!(w.q?.hist?.d?.length>1)){box.innerHTML='<div class="empty">Price history for '+esc(S.wsel||'this stock')+' is still loading. It usually arrives within a couple of minutes.</div>';hd.innerHTML='';$('ta').innerHTML='';return;}
+    return drawCandles({t:w.t,avg:null,dayPct:w.dayPct,q:{...w.q,name:(w.q.name||w.t)+' · watchlist'}},box,hd,C);
   }else if(S.view==='idx'&&S.idx[S.isel]?.hist){
     const x0=S.idx[S.isel],xl=S.live[x0.etf],x=xl?{...x0,last:xl.last,prevClose:xl.prevClose,asOf:xl.day+' live',live:xl}:x0;
     return drawCandles({t:x.etf,avg:null,dayPct:x.prevClose?x.last/x.prevClose-1:null,idx:true,q:{...x,name:`${x.name}, charted with ${x.etf}, the ETF that tracks it`}},box,hd,C);
@@ -532,8 +558,10 @@ function drawCandles(r,box,hd,C){
 
 // interactions
 $('pos').addEventListener('click',e=>{const tr=e.target.closest('tr.pos');if(!tr)return;const t=tr.dataset.t;S.open=(S.open===t&&S.sel===t)?null:t;S.sel=t;S.view='stock';render();});
+$('watchT').addEventListener('click',e=>{const tr=e.target.closest('tr.pos');if(!tr)return;S.view='watch';S.wsel=tr.dataset.t;render();$('chart').scrollIntoView({block:'center',behavior:'smooth'});});
+$('watchT').addEventListener('keydown',e=>{if(e.key==='Enter'){const tr=e.target.closest('tr.pos');if(tr)tr.click();}});
 $('pos').addEventListener('keydown',e=>{if(e.key==='Enter'){const tr=e.target.closest('tr.pos');if(tr)tr.click();}});
-$('pills').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.k==='__P')S.view='port';else if(b.dataset.k.startsWith('__I')){S.view='idx';S.isel=b.dataset.k.slice(3);}else{S.view='stock';S.sel=b.dataset.k;}render();});
+$('pills').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.k==='__W')return;if(b.dataset.k==='__P')S.view='port';else if(b.dataset.k.startsWith('__I')){S.view='idx';S.isel=b.dataset.k.slice(3);}else{S.view='stock';S.sel=b.dataset.k;}render();});
 $('chead').addEventListener('click',e=>{const b=e.target.closest('[data-r]');if(!b)return;S.range=b.dataset.r;drawChart(model());});
 $('newsPills').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S.newsF=b.dataset.k;render();});
 let rt;addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>drawChart(model()),150);});
@@ -573,16 +601,19 @@ function notifState(){const b=$('aNotif'),ok='Notification' in window;b.hidden=!
   $('aNote').textContent='Alerts are checked each time prices refresh and show at the top of this page for everyone who signs in. '+(!ok?'This browser cannot show system notifications, so alerts appear only inside the app.':Notification.permission==='granted'?'This device also gets a system notification while the app is open in a tab or window.':Notification.permission==='denied'?'System notifications are blocked for this site in your browser settings.':'Choose "Notify me on this device" to also get a system notification while the app is open.');}
 $('aNotif').addEventListener('click',async()=>{try{await Notification.requestPermission();}catch(x){}notifState();});
 $('alertBtn').addEventListener('click',()=>{const M=model();$('aErr').textContent='';$('aDef').value=S.alerts.default??'';
-  $('aRows').innerHTML=M.rows.map((r,i)=>`<tr><td><span class="tk">${esc(r.t)}</span></td><td class="num ${cls(r.dayPct)}">${pct(r.dayPct)}</td><td><input id="a${i}" data-t="${esc(r.t)}" aria-label="Alert level for ${esc(r.t)}" inputmode="decimal" placeholder="${S.alerts.default!=null?'General: '+S.alerts.default+'%':'Off'}" value="${esc(S.alerts.by?.[r.t]??'')}" style="width:130px"></td></tr>`).join('');
+  $('aWDef').value=S.alerts.watchDefault??'';
+  const arow=(r,gen)=>`<tr><td><span class="tk">${esc(r.t)}</span></td><td class="num ${cls(r.dayPct)}">${pct(r.dayPct)}</td><td><input data-t="${esc(r.t)}" aria-label="Alert level for ${esc(r.t)}" inputmode="decimal" placeholder="${gen!=null?'General: '+gen+'%':'Off'}" value="${esc(S.alerts.by?.[r.t]??'')}" style="width:130px"></td></tr>`;
+  const wr=watchRows(),sub=t=>`<tr class="lot"><td colspan="3" style="font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:11px">${t}</td></tr>`;
+  $('aRows').innerHTML=(M.rows.length?sub('Holdings')+M.rows.map(r=>arow(r,S.alerts.default)).join(''):'')+(wr.length?sub('Watchlist')+wr.map(r=>arow(r,S.alerts.watchDefault)).join(''):'');
   notifState();$('adlg').showModal();});
 $('aClose').addEventListener('click',()=>$('adlg').close());
 $('aform').addEventListener('submit',async e=>{e.preventDefault();const err=$('aErr');err.textContent='';
   const num=v=>{v=String(v).trim().replace('%','');if(v==='')return null;const x=+v;return x>0&&x<=100?x:NaN;};
-  const def=num($('aDef').value),by={};
+  const def=num($('aDef').value),wdef=num($('aWDef').value),by={};
   for(const inp of $('aRows').querySelectorAll('input')){const v=num(inp.value);if(Number.isNaN(v)){err.textContent='Alert levels are percentages between 0 and 100.';return;}if(v!=null)by[inp.dataset.t]=v;}
-  if(Number.isNaN(def)){err.textContent='Alert levels are percentages between 0 and 100.';return;}
+  if(Number.isNaN(def)||Number.isNaN(wdef)){err.textContent='Alert levels are percentages between 0 and 100.';return;}
   $('aSave').disabled=true;
-  try{apply(await api('/api/alerts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({default:def,by})}));$('adlg').close();}
+  try{apply(await api('/api/alerts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({default:def,watchDefault:wdef,by})}));$('adlg').close();}
   catch(x){err.textContent=x.message||'Could not save.';}
   $('aSave').disabled=false;});
 
@@ -604,9 +635,9 @@ async function api(path,opt){
   return body;
 }
 function apply(st){
-  S.lots=st.lots||[];S.canWrite=!!st.canWrite;S.live=st.live||{};S.news=st.news||[];S.watch=st.watch||{};S.watchList=st.watchlist||[];if(st.build){if(S.build&&S.build.number!==st.build.number){location.reload();return;}   // a new build was deployed: load it
+  S.lots=st.lots||[];S.canWrite=!!st.canWrite;S.live=st.live||{};S.news=st.news||[];S.watchList=st.watchlist||[];S.watch={};for(const [k,v] of Object.entries(st.watch||{}))S.watch[k]={...v,hist:H[k]};if(st.build){if(S.build&&S.build.number!==st.build.number){location.reload();return;}   // a new build was deployed: load it
     S.build=st.build;$('build').textContent=`Build ${st.build.number}${st.build.commit?' ('+st.build.commit+')':''} · running since ${new Date(st.build.started*1000).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}`;}
-  S.delayed=st.delayed!==false;S.alerts=st.alerts||{default:null,by:{}};S.events=st.alertEvents||[];
+  S.delayed=st.delayed!==false;S.alerts=st.alerts||{default:null,watchDefault:null,by:{}};S.events=st.alertEvents||[];
   S.quotes={};for(const [k,v] of Object.entries(st.quotes||{}))S.quotes[k]={...v,hist:H[k]};
   S.idx={};for(const [k,v] of Object.entries(st.idx||{}))S.idx[k]={...v,hist:H[v.etf]};
   S.market={...st.market,bench:H.SPY?{SPY:{d:H.SPY.d,c:H.SPY.c}}:null};
