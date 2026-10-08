@@ -92,7 +92,8 @@ def test_everything_needs_a_sign_in(client):
     assert client.get("/api/state").status_code == 401
     assert client.get("/api/history").status_code == 401
     assert client.put("/api/lots", json={"lots": []}).status_code == 401
-    assert client.get("/healthz").json() == {"ok": True}
+    hz = client.get("/healthz").json()
+    assert hz["ok"] is True and isinstance(hz["build"], int) and hz["build"] >= 3
     assert client.post("/login", data={"password": "nope"}).status_code == 401
     assert client.get("/api/state").status_code == 401
 
@@ -101,6 +102,7 @@ def test_seed_edit_and_state(client):
     assert client.post("/login", data={"password": "edit-pass"}).status_code == 303
     st = client.get("/api/state").json()
     assert len(st["lots"]) == 10 and st["canWrite"] is True and st["quotes"] == {}
+    assert st["build"]["number"] >= 3 and st["build"]["started"] > 0
     held = sorted({l["ticker"] for l in st["lots"]})
     load(client.engine, held + client.engine.etfs())
     st = client.get("/api/state").json()

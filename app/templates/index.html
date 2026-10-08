@@ -193,6 +193,7 @@ dialog td,dialog th{padding:6px 6px;text-align:left} dialog td:first-child,dialo
   </section>
 
   <p class="note" id="method"></p>
+  <p class="note num" id="build" style="font-size:11.5px"></p>
 </div>
 
 <dialog id="adlg">
@@ -603,7 +604,9 @@ async function api(path,opt){
   return body;
 }
 function apply(st){
-  S.lots=st.lots||[];S.canWrite=!!st.canWrite;S.live=st.live||{};S.news=st.news||[];S.watch=st.watch||{};S.watchList=st.watchlist||[];S.delayed=st.delayed!==false;S.alerts=st.alerts||{default:null,by:{}};S.events=st.alertEvents||[];
+  S.lots=st.lots||[];S.canWrite=!!st.canWrite;S.live=st.live||{};S.news=st.news||[];S.watch=st.watch||{};S.watchList=st.watchlist||[];if(st.build){if(S.build&&S.build.number!==st.build.number){location.reload();return;}   // a new build was deployed: load it
+    S.build=st.build;$('build').textContent=`Build ${st.build.number}${st.build.commit?' ('+st.build.commit+')':''} · running since ${new Date(st.build.started*1000).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}`;}
+  S.delayed=st.delayed!==false;S.alerts=st.alerts||{default:null,by:{}};S.events=st.alertEvents||[];
   S.quotes={};for(const [k,v] of Object.entries(st.quotes||{}))S.quotes[k]={...v,hist:H[k]};
   S.idx={};for(const [k,v] of Object.entries(st.idx||{}))S.idx[k]={...v,hist:H[v.etf]};
   S.market={...st.market,bench:H.SPY?{SPY:{d:H.SPY.d,c:H.SPY.c}}:null};

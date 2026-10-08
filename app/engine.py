@@ -8,6 +8,7 @@ import logging
 import time
 from zoneinfo import ZoneInfo
 
+from . import build
 from .av import AVError
 from .store import Store
 
@@ -280,6 +281,7 @@ class Engine:
                             if e["ticker"] in held][-30:],
             "canWrite": can_write, "delayed": self.delayed, "histVersion": version,
             "configured": self.av is not None, "error": self.last_error,
+            "build": build.info(),
         }
 
     def history(self) -> dict:

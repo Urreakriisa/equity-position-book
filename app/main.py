@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from . import build
 from .av import AlphaVantage
 from .engine import DEFAULT_WATCH, Engine
 from .store import Store
@@ -153,7 +154,7 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
 
     @app.get("/healthz")
     def healthz():
-        return {"ok": True}
+        return {"ok": True, "build": build.BUILD, "commit": build.COMMIT}
 
     @app.get("/api/state")
     def api_state(request: Request):
