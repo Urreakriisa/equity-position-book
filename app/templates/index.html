@@ -836,7 +836,7 @@ function analyze(h){
   for(let i=Math.max(k,n-170);i<n-k;i++){let hi=true,lo=true;for(let j=i-k;j<=i+k;j++){if(H[j]>H[i])hi=false;if(L[j]<L[i])lo=false;}
     if(hi&&(!ph.length||i-ph[ph.length-1].i>k))ph.push({i,y:H[i]});if(lo&&(!pl.length||i-pl[pl.length-1].i>k))pl.push({i,y:L[i]});}
   const mxI=(a,b)=>{let v=-1e99,x=a;for(let i=Math.max(0,a);i<=b;i++)if(H[i]>v){v=H[i];x=i}return{i:x,y:v}},mnI=(a,b)=>{let v=1e99,x=a;for(let i=Math.max(0,a);i<=b;i++)if(L[i]<v){v=L[i];x=i}return{i:x,y:v}};
-  const add=(name,bias,status,text,lines,target)=>out.push({name,bias,status,text,lines,target});
+  const add=(name,bias,status,text,lines,target,curve)=>out.push({name,bias,status,text,lines,target,curve});
   // Double top / bottom: pair the latest swing extreme with an earlier one at the same level (not only the adjacent one),
   // and require a real move into the first extreme: it is the 20-session extreme and ends a leg of 8% or more.
   if(ph.length>=2){const b=ph[ph.length-1];
@@ -903,7 +903,7 @@ function analyze(h){
     add('Cup and handle','Bullish',cf?'Confirmed':'Forming',
       done?`Cup from ${dlabel(d[a.i])} to ${dlabel(d[R.i])} with a rim near ${nf(rim)} and a low of ${nf(B.y)}${hl!=null?', then a shallow pullback':''}. ${cf?'Price has closed above the rim.':hl!=null?'A close above the rim would confirm it.':'The cup is complete; watch for a short handle pullback and a close above the rim to confirm.'}`
           :`Cup forming from the ${dlabel(d[a.i])} high: a rim near ${nf(rim)}, a rounded low of ${nf(B.y)} on ${dlabel(d[B.i])}, and a right side back up to ${nf(R.y)}. A return to the rim would complete the cup; a short pullback there (the handle) and a close above ${nf(rim)} would confirm it.`,
-      [[a.i,rim,last,rim]],done?rim+(rim-B.y):null);}}
+      [[a.i,rim,last,rim]],done?rim+(rim-B.y):null,[[a.i,a.y],[B.i,B.y],[R.i,R.y]]);}}
   const dt=out.findIndex(p=>p.name==='Double top'),db=out.findIndex(p=>p.name==='Double bottom');
   if(dt>=0&&db>=0)out.splice(ph[ph.length-1].i>pl[pl.length-1].i?db:dt,1);
   return{ma50,ma200,pats:out,trend,state};
@@ -928,7 +928,11 @@ function drawCandles(r,box,hd,C,taEl){
     g+=`<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${Y(Hh[i]).toFixed(1)}" y2="${Y(Ll[i]).toFixed(1)}" stroke="${col}" stroke-width="1"/><rect x="${(x-cw/2).toFixed(1)}" y="${y1.toFixed(1)}" width="${cw.toFixed(1)}" height="${Math.max(1,y2-y1).toFixed(1)}" fill="${u&&cw>3?sf:col}" stroke="${col}" stroke-width="1"/>`;}
   const path=a=>{let p='',on=false;for(let i=s;i<n;i++){if(a[i]==null){on=false;continue;}p+=(on?'L':'M')+X(i).toFixed(1)+' '+Y(a[i]).toFixed(1);on=true;}return p;};
   g+=`<path d="${path(ta.ma50)}" fill="none" stroke="${C('--accent')}" stroke-width="1.75" stroke-linejoin="round"/><path d="${path(ta.ma200)}" fill="none" stroke="${C('--bench')}" stroke-width="1.75" stroke-linejoin="round"/>`;
-  g+=`<g clip-path="url(#plot)">`+ta.pats.map(p=>p.lines.map(l=>`<line x1="${X(l[0])}" y1="${Y(l[1])}" x2="${X(l[2])}" y2="${Y(l[3])}" stroke="${C('--ink')}" stroke-width="1.5" stroke-dasharray="6 4"/>`).join('')).join('')+`</g>`;
+  g+=`<g clip-path="url(#plot)">`+ta.pats.map(p=>{
+    let pg=p.lines.map(l=>`<line x1="${X(l[0])}" y1="${Y(l[1])}" x2="${X(l[2])}" y2="${Y(l[3])}" stroke="${C('--ink')}" stroke-width="1.5" stroke-dasharray="6 4"/>`).join('');
+    if(p.curve){const [p0,p1,p2]=p.curve,cx=2*X(p1[0])-(X(p0[0])+X(p2[0]))/2,cy=2*Y(p1[1])-(Y(p0[1])+Y(p2[1]))/2;
+      pg+=`<path d="M ${X(p0[0]).toFixed(1)} ${Y(p0[1]).toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${X(p2[0]).toFixed(1)} ${Y(p2[1]).toFixed(1)}" fill="none" stroke="${C('--ink')}" stroke-width="2.25" stroke-dasharray="1 5" stroke-linecap="round" opacity=".9"/>`;}
+    return pg;}).join('')+`</g>`;
   ta.pats.forEach(p=>{const l=p.lines[0];g+=`<text x="${X(l[2])-4}" y="${Math.max(m.t+10,Y(l[3])-6)}" fill="${C('--ink')}" font-size="11" font-weight="700" text-anchor="end" font-family="Archivo,sans-serif" stroke="${sf}" stroke-width="3" paint-order="stroke">${esc(p.name)}</text>`;});
   if(q.last!=null)g+=`<rect x="${W-m.r+2}" y="${Y(q.last)-9}" width="${m.r-4}" height="18" rx="3" fill="${C('--ink')}"/><text x="${W-m.r+8}" y="${Y(q.last)+4}" fill="${sf}" font-size="11" font-family="IBM Plex Mono,monospace">${nf(q.last,q.last<1000?2:1)}</text>`;
   g+=`<line id="xh" y1="${m.t}" y2="${H-m.b}" stroke="${C('--muted')}" stroke-width="1" visibility="hidden"/>`;
