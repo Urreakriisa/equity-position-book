@@ -878,22 +878,32 @@ function analyze(h){
   if(best){const {e,p,mv}=best,hi=mxI(e+1,last).y,lo=mnI(e+1,last).y,pole=Math.abs(c[e]-c[e-p]);
     if(mv>0&&lo>=c[e]-.5*pole&&hi<=H[e]*1.03)add('Bull flag','Bullish','Forming',`A ${pct(mv,0)} run in ${p} sessions to ${dlabel(d[e])}, then ${last-e} sessions of consolidation between ${nf(lo)} and ${nf(hi)}. A close above ${nf(hi)} would continue the move.`,[[e,hi,last,hi],[e,lo,last,lo]],hi+pole);
     if(mv<0&&hi<=c[e]+.5*pole&&lo>=L[e]*.97)add('Bear flag','Bearish','Forming',`A ${pct(mv,0)} drop in ${p} sessions to ${dlabel(d[e])}, then ${last-e} sessions of consolidation between ${nf(lo)} and ${nf(hi)}. A close below ${nf(lo)} would continue the move.`,[[e,hi,last,hi],[e,lo,last,lo]],lo-pole);}
-  // Cup and handle: try each recent swing high as the left rim, newest first, instead of only the single
-  // highest high of the window (an earlier spike used to hijack the rim), and report a finished cup even
-  // before its handle pullback has started.
-  if(n>=80)for(let q2=ph.length-1;q2>=0;q2--){const a=ph[q2];if(last-a.i<16)continue;
+  // Cup and handle: test each recent swing high as the left rim. A completed cup has its right side
+  // within 5% of the rim; a developing cup has recovered at least a third of its depth and is still
+  // climbing toward the rim. The deepest valid structure wins, so a shallow cup nested inside the
+  // right half of a larger one never hides the dominant formation.
+  if(n>=80){let cup=null;
+  for(let q2=ph.length-1;q2>=0;q2--){const a=ph[q2];if(last-a.i<16)continue;
     const B=mnI(a.i+1,last-5),dep=(a.y-B.y)/a.y;
     if(dep<.07||dep>.45||B.i-a.i<8)continue;
     if(B.i-a.i>1&&mxI(a.i+1,B.i-1).y>a.y*1.02)continue;
-    const R=mxI(B.i+1,last);
-    if(R.i-B.i<8||R.y<a.y*.95||R.y>a.y*1.05||last-R.i>30)continue;
-    const fr=(B.i-a.i)/(R.i-a.i);if(fr<.2||fr>.8)continue;
     if(a.y<mnI(Math.max(0,a.i-40),a.i).y*1.08)continue;
-    const rim=Math.max(a.y,R.y),hl=R.i<=last-3?mnI(R.i+1,last).y:null;
-    if(hl!=null&&hl<R.y-.5*(R.y-B.y))continue;
-    const cf=C>rim&&hl!=null;
-    add('Cup and handle','Bullish',cf?'Confirmed':'Forming',`Cup from ${dlabel(d[a.i])} to ${dlabel(d[R.i])} with a rim near ${nf(rim)} and a low of ${nf(B.y)}${hl!=null?', then a shallow pullback':''}. ${cf?'Price has closed above the rim.':hl!=null?'A close above the rim would confirm it.':'The cup is complete; watch for a short handle pullback and a close above the rim to confirm.'}`,[[a.i,rim,last,rim]],rim+(rim-B.y));
-    break;}
+    const R=mxI(B.i+1,last);if(R.i-B.i<8)continue;
+    let c2=null;
+    if(R.y>=a.y*.95&&R.y<=a.y*1.05&&last-R.i<=30){
+      const fr=(B.i-a.i)/(R.i-a.i);if(fr<.2||fr>.8)continue;
+      const hl=R.i<=last-3?mnI(R.i+1,last).y:null;
+      if(hl!=null&&hl<R.y-.5*(R.y-B.y))continue;
+      c2={a,B,R,dep,hl,done:true};
+    }else if(R.y<a.y*.95&&last-B.i>=8&&last-R.i<=5&&C>=R.y*.97&&(R.y-B.y)/(a.y-B.y)>=.33){
+      c2={a,B,R,dep,hl:null,done:false};
+    }
+    if(c2&&(!cup||c2.dep>cup.dep))cup=c2;}
+  if(cup){const {a,B,R,dep,hl,done}=cup,rim=done?Math.max(a.y,R.y):a.y,cf=done&&C>rim&&hl!=null;
+    add('Cup and handle','Bullish',cf?'Confirmed':'Forming',
+      done?`Cup from ${dlabel(d[a.i])} to ${dlabel(d[R.i])} with a rim near ${nf(rim)} and a low of ${nf(B.y)}${hl!=null?', then a shallow pullback':''}. ${cf?'Price has closed above the rim.':hl!=null?'A close above the rim would confirm it.':'The cup is complete; watch for a short handle pullback and a close above the rim to confirm.'}`
+          :`Cup forming from the ${dlabel(d[a.i])} high: a rim near ${nf(rim)}, a rounded low of ${nf(B.y)} on ${dlabel(d[B.i])}, and a right side back up to ${nf(R.y)}. A return to the rim would complete the cup; a short pullback there (the handle) and a close above ${nf(rim)} would confirm it.`,
+      [[a.i,rim,last,rim]],done?rim+(rim-B.y):null);}}
   const dt=out.findIndex(p=>p.name==='Double top'),db=out.findIndex(p=>p.name==='Double bottom');
   if(dt>=0&&db>=0)out.splice(ph[ph.length-1].i>pl[pl.length-1].i?db:dt,1);
   return{ma50,ma200,pats:out,trend,state};
