@@ -147,7 +147,7 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
         if len(recent) >= 8:
             return login_page("Too many attempts. Wait ten minutes and try again.", 429)
         form = await request.form()
-        pw = str(form.get("password", ""))
+        pw = str(form.get("password", "")).strip()  # pasted passwords often carry a stray space/newline
         got = None
         if edit_pw and hmac.compare_digest(pw.encode(), edit_pw.encode()):
             got = "edit"
