@@ -878,11 +878,22 @@ function analyze(h){
   if(best){const {e,p,mv}=best,hi=mxI(e+1,last).y,lo=mnI(e+1,last).y,pole=Math.abs(c[e]-c[e-p]);
     if(mv>0&&lo>=c[e]-.5*pole&&hi<=H[e]*1.03)add('Bull flag','Bullish','Forming',`A ${pct(mv,0)} run in ${p} sessions to ${dlabel(d[e])}, then ${last-e} sessions of consolidation between ${nf(lo)} and ${nf(hi)}. A close above ${nf(hi)} would continue the move.`,[[e,hi,last,hi],[e,lo,last,lo]],hi+pole);
     if(mv<0&&hi<=c[e]+.5*pole&&lo>=L[e]*.97)add('Bear flag','Bearish','Forming',`A ${pct(mv,0)} drop in ${p} sessions to ${dlabel(d[e])}, then ${last-e} sessions of consolidation between ${nf(lo)} and ${nf(hi)}. A close below ${nf(lo)} would continue the move.`,[[e,hi,last,hi],[e,lo,last,lo]],lo-pole);}
-  if(n>=80){const Lr=mxI(n-200,n-45),B=mnI(Lr.i+1,n-8),dep=(Lr.y-B.y)/Lr.y;
-    if(dep>=.12&&dep<=.45&&B.i-Lr.i>=10){const R=mxI(B.i+1,last);
-      if(R.i-B.i>=10&&R.y>=Lr.y*.95&&R.y<=Lr.y*1.05&&R.i<=last-4&&last-R.i<=30){const fr=(B.i-Lr.i)/(R.i-Lr.i),hl=mnI(R.i+1,last).y,rim=Math.max(Lr.y,R.y);
-        if(fr>=.25&&fr<=.75&&hl>=R.y-.5*(R.y-B.y)){const cf=C>rim;
-          add('Cup and handle','Bullish',cf?'Confirmed':'Forming',`Cup from ${dlabel(d[Lr.i])} to ${dlabel(d[R.i])} with a rim near ${nf(rim)} and a low of ${nf(B.y)}, then a shallow pullback. ${cf?'Price has closed above the rim.':'A close above the rim would confirm it.'}`,[[Lr.i,rim,last,rim]],rim+(rim-B.y));}}}}
+  // Cup and handle: try each recent swing high as the left rim, newest first, instead of only the single
+  // highest high of the window (an earlier spike used to hijack the rim), and report a finished cup even
+  // before its handle pullback has started.
+  if(n>=80)for(let q2=ph.length-1;q2>=0;q2--){const a=ph[q2];if(last-a.i<16)continue;
+    const B=mnI(a.i+1,last-5),dep=(a.y-B.y)/a.y;
+    if(dep<.07||dep>.45||B.i-a.i<8)continue;
+    if(B.i-a.i>1&&mxI(a.i+1,B.i-1).y>a.y*1.02)continue;
+    const R=mxI(B.i+1,last);
+    if(R.i-B.i<8||R.y<a.y*.95||R.y>a.y*1.05||last-R.i>30)continue;
+    const fr=(B.i-a.i)/(R.i-a.i);if(fr<.2||fr>.8)continue;
+    if(a.y<mnI(Math.max(0,a.i-40),a.i).y*1.08)continue;
+    const rim=Math.max(a.y,R.y),hl=R.i<=last-3?mnI(R.i+1,last).y:null;
+    if(hl!=null&&hl<R.y-.5*(R.y-B.y))continue;
+    const cf=C>rim&&hl!=null;
+    add('Cup and handle','Bullish',cf?'Confirmed':'Forming',`Cup from ${dlabel(d[a.i])} to ${dlabel(d[R.i])} with a rim near ${nf(rim)} and a low of ${nf(B.y)}${hl!=null?', then a shallow pullback':''}. ${cf?'Price has closed above the rim.':hl!=null?'A close above the rim would confirm it.':'The cup is complete; watch for a short handle pullback and a close above the rim to confirm.'}`,[[a.i,rim,last,rim]],rim+(rim-B.y));
+    break;}
   const dt=out.findIndex(p=>p.name==='Double top'),db=out.findIndex(p=>p.name==='Double bottom');
   if(dt>=0&&db>=0)out.splice(ph[ph.length-1].i>pl[pl.length-1].i?db:dt,1);
   return{ma50,ma200,pats:out,trend,state};
