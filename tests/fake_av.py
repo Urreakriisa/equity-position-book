@@ -4,6 +4,7 @@ import datetime as dt
 import math
 import random
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from app.av import AVError, rating_label
 
@@ -26,6 +27,8 @@ def synthetic(seed: int, start: float, days: int = 320, end: dt.date | None = No
 class FakeAV:
     def __init__(self, history: dict[str, list[list]] | None = None, today: str = "2026-10-07"):
         self.history, self.today, self.calls = history or {}, today, []
+        self.members: list[str] = []         # what the index ETFs "hold"
+        self.no_estimates: set[str] = set()
 
     @classmethod
     def from_csv_dir(cls, folder: str, **kw):
@@ -63,16 +66,53 @@ class FakeAV:
         last = self._rows(sym)[-1][4]
         k = sum(map(ord, sym))
         counts = [k % 12, 20 + k % 25, k % 9, k % 3, 0]
-        return {"name": f"{sym} Corporation", "sector": "TEST",
+        return {"name": f"{sym} Corporation",
                 "target": {"avg": round(last * (1.05 + (k % 40) / 100), 2), "analysts": sum(counts),
                            "rating": rating_label(*counts), "split": counts},
                 "beta5y": round(0.5 + (k % 30) / 10, 2), "ma50": last, "ma200": last * 0.9,
-                "mktcap": 1e11, "pe": 25.0, "fpe": 20.0}
+                "mktcap": 1e11 + k * 1e9, "pe": 25.0, "fpe": 12.0 + k % 30, "industry": "TEST INDUSTRY",
+                "px": last, "sector": ("TECHNOLOGY", "HEALTHCARE", "FINANCIAL SERVICES", "UTILITIES")[k % 4],
+                "val": {"peg": round(0.6 + (k % 23) / 10, 2), "evEbitda": 18.0 + k % 9, "evRev": 6.0, "ps": 7.0, "pb": 9.0,
+                        "eps": round(last / 25, 2), "revGrowth": round((k % 40) / 100, 3), "epsGrowth": round((k % 55) / 100, 3),
+                        "margin": round(0.08 + (k % 31) / 100, 3), "opMargin": round(0.1 + (k % 37) / 100, 3),
+                        "roe": round(0.05 + (k % 45) / 100, 3), "roa": 0.1, "divYield": 0.01, "revenue": 5e10,
+                        "hi52": round(last * (1.02 + (k % 17) / 100), 2), "lo52": round(last * 0.7, 2), "exDiv": None}}
+
+    async def earnings(self, sym):
+        self.calls.append(("earn", sym))
+        k = sum(map(ord, sym))
+        return [{"fiscal": f"2026-0{9 - 3 * i}-30" if i < 3 else "2025-12-31", "date": f"2026-0{10 - 3 * i}-2{i}" if i < 3 else "2026-01-25",
+                 "eps": round(1.0 + i / 10, 2), "est": 1.0, "surp": round(((k + i) % 7 - 2) * 2.5, 2), "time": "post-market"}
+                for i in range(4)]
+
+    async def earnings_calendar(self, symbol=None):
+        self.calls.append(("ecal", symbol))
+        base = dt.datetime.now(ZoneInfo("America/New_York")).date()   # the app counts days in New York time
+        syms = [symbol] if symbol else sorted(set(self.history) | set(self.members))
+        return {s: {"date": (base + dt.timedelta(days=sum(map(ord, s)) % 25)).isoformat(), "fiscal": "2026-09-30",
+                    "est": round(1 + sum(map(ord, s)) % 9 / 10, 2), "time": "post-market"} for s in syms}
+
+    async def estimates(self, sym, today):
+        self.calls.append(("est", sym))
+        if sym in self.no_estimates:
+            raise AVError("This is a premium endpoint")
+        k = sum(map(ord, sym))
+        row = lambda eps, n: {"date": "2026-12-31", "eps": eps, "n": n, "d30": round(eps / (1 + (k % 11 - 4) / 100), 4),
+                              "d90": round(eps / (1 + (k % 13 - 5) / 100), 4), "chg30": round((k % 11 - 4) / 100, 4),
+                              "chg90": round((k % 13 - 5) / 100, 4), "up30": k % 9, "down30": k % 4, "rev": 1e10}
+        return {"fy1": row(8.0, 30), "fy2": row(9.5, 28), "q1": row(2.1, 25)}
+
+    async def etf_holdings(self, sym):
+        self.calls.append(("etf", sym))
+        if not self.members:
+            raise AVError("no ETF holdings returned")
+        return self.members[:40] if sym == "QQQ" else self.members
 
     async def news(self, sym):
         self.calls.append(("news", sym))
         return [{"ticker": sym, "title": f"{sym} headline {i}", "source": "Example Wire",
-                 "url": f"https://example.com/{sym.lower()}/{i}", "date": "2026-10-0%d" % (7 - i), "ts": "2026100%dT120000" % (7 - i)}
+                 "url": f"https://example.com/{sym.lower()}/{i}", "date": "2026-10-0%d" % (7 - i), "ts": "2026100%dT120000" % (7 - i),
+                 "sent": round(0.3 - i * 0.25, 2), "label": ("Bullish", "Neutral", "Somewhat-Bearish")[i]}
                 for i in range(3)]
 
     async def tbill(self):

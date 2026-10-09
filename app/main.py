@@ -57,6 +57,13 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
 
     def notify(e: dict) -> None:
         where = " (watchlist)" if e.get("watch") else ""
+        if e.get("kind") == "earnings":
+            when = "today" if e["days"] == 0 else "tomorrow" if e["days"] == 1 else f'in {e["days"]} days'
+            day = dt.date.fromisoformat(e["date"]).strftime("%a %b %-d")
+            session = {"pre-market": ", before the open", "post-market": ", after the close"}.get(e.get("time") or "", "")
+            est = f' EPS estimate {e["est"]:,.2f}.' if e.get("est") is not None else ""
+            push.send(f'{e["ticker"]} reports earnings {when}{where}', f"{day}{session}.{est}", e["id"])
+            return
         push.send(f'{e["ticker"]} {e["pct"]:+.2f}% today{where}',
                   f'Past your {e["threshold"]:g}% alert. Price {e["last"]:,.2f}.', e["id"])
 
@@ -175,7 +182,9 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
 
     @app.get("/healthz")
     def healthz():
-        return {"ok": True, "build": build.BUILD, "commit": build.COMMIT}
+        # Feed states are ok / partial / failed / pending only: no positions, no messages.
+        return {"ok": True, "build": build.BUILD, "commit": build.COMMIT,
+                "feeds": engine.feed_status(), "screen": {"members": len(engine.universe())}}
 
     @app.get("/api/state")
     def api_state(request: Request):
@@ -185,6 +194,16 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
     def api_history(request: Request):
         need(request)
         return engine.history()
+
+    @app.get("/api/analytics")
+    async def api_analytics(request: Request):
+        need(request)
+        return await asyncio.to_thread(engine.analytics)
+
+    @app.get("/api/ideas")
+    async def api_ideas(request: Request):
+        need(request)
+        return await asyncio.to_thread(engine.ideas)
 
     lookups: list[float] = []
 
@@ -280,7 +299,17 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
                 raise HTTPException(400, f"Not a ticker: {t[:12]}")
             if (x := level(v)) is not None:
                 by[t] = x
-        await asyncio.to_thread(engine.set_alerts, level(body.get("default")), level(body.get("watchDefault")), by)
+        earn_days = None                                   # absent: keep the current setting
+        if "earnDays" in body:
+            try:
+                earn_days = int(body["earnDays"] or 0)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Earnings alerts take a number of days between 0 and 30") from None
+            if not (0 <= earn_days <= 30):
+                raise HTTPException(400, "Earnings alerts take a number of days between 0 and 30")
+        await asyncio.to_thread(engine.set_alerts, level(body.get("default")), level(body.get("watchDefault")),
+                                by, earn_days)
+        await asyncio.to_thread(engine.check_earnings)
         # Check the new levels against the prices already loaded.
         for sym in await asyncio.to_thread(lambda: engine.held() + engine.watchlist()):
             if (q := store.get(f"quote:{sym}")):
