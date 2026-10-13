@@ -244,7 +244,7 @@ th[aria-sort="ascending"]::after{content:" \25B2";font-size:9px} th[aria-sort="d
     </section>
     <div class="two">
       <section class="panel">
-        <div class="ph"><h2>Upcoming earnings and economic events</h2><span class="mut" style="font-size:12px">Holdings, watchlist, Fed decisions and the main US data releases</span></div>
+        <div class="ph"><h2>Upcoming earnings and economic events</h2><span class="mut" style="font-size:12px">Next two weeks: holdings, watchlist, Fed decisions and the main US data releases</span></div>
         <ul class="rowlist" id="upEarn"><li style="display:block" class="empty">Earnings dates load with the market data.</li></ul>
         <p class="note" id="econNote" style="margin:0;padding:10px 16px"></p>
       </section>
@@ -549,15 +549,15 @@ function rOverview(M){
   }else if(S.got.lots)box.innerHTML='<div class="empty">No priced holdings yet.</div>';
   const names=[...rows.map(r=>({t:r.t,q:r.q,held:true})),...watchRows().map(r=>({t:r.t,q:r.q}))].filter(x=>x.q?.earn?.next).sort((a,b)=>a.q.earn.next.date.localeCompare(b.q.earn.next.date));
   if(S.got.lots){
-    const ER=names.slice(0,8).map(x=>{const e=x.q.earn.next,last=x.q.earn.hist?.[0];return {date:e.date,earn:x,sub:[sess(e.time),e.est!=null?'EPS estimate '+nf(e.est):'',last?.surp!=null?`last quarter ${last.surp>=0?'beat':'missed'} by ${nf(Math.abs(last.surp),1)}%`:''].filter(Boolean).join(' · ')||'No estimate published yet'};});
-    const horizon=ER.length?ER[ER.length-1].date:'9',EC=(S.econ?.events||[]).filter(e=>e.date<=horizon||ER.length<3);
-    const all=[...ER,...EC.map(e=>({date:e.date,ev:e,sub:e.detail}))].sort((a,b)=>a.date.localeCompare(b.date)||(a.ev?1:-1)).slice(0,18);
+    const ER=names.map(x=>{const e=x.q.earn.next,last=x.q.earn.hist?.[0];return {date:e.date,earn:x,sub:[sess(e.time),e.est!=null?'EPS estimate '+nf(e.est):'',last?.surp!=null?`last quarter ${last.surp>=0?'beat':'missed'} by ${nf(Math.abs(last.surp),1)}%`:''].filter(Boolean).join(' · ')||'No estimate published yet'};});
+    // The next two weeks only: holdings and watchlist reports, then the economic events the server already limits to 14 days.
+    const EC=S.econ?.events||[],all=[...ER.filter(x=>daysTo(x.date)<=14),...EC.map(e=>({date:e.date,ev:e,sub:e.detail}))].sort((a,b)=>a.date.localeCompare(b.date)||(a.ev?1:-1));
     const KC={fomc:'warn',closed:'dn',early:'dn'};
     $('upEarn').innerHTML=all.length?all.map(x=>{const n=daysTo(x.date),soon=n<=3;
       const who=x.earn?`<button type="button" class="link" data-t="${esc(x.earn.t)}">${esc(x.earn.t)}</button>${x.earn.held?'':' <span class="sent">watchlist</span>'}`
         :`<span style="font-weight:600">${esc(x.ev.title)}</span> <span class="sent ${KC[x.ev.kind]||''}">${esc(x.ev.kind==='fomc'?'Fed':x.ev.kind==='closed'||x.ev.kind==='early'?'Holiday':'US data')}</span>`;
       return `<li><span>${who}</span><span class="num ${soon?'':'mut'}" style="font-weight:${soon?600:400}">${fdate(x.date)} · ${when(n)}</span><span class="d">${esc(x.sub)}</span></li>`;}).join('')
-      :`<li style="display:block" class="empty">${S.feeds?.ecal?.state==='failed'?'The earnings calendar is not available from the data provider right now.':'Nothing scheduled in the next three months.'}</li>`;
+      :`<li style="display:block" class="empty">${S.feeds?.ecal?.state==='failed'?'The earnings calendar is not available from the data provider right now.':'Nothing scheduled in the next two weeks. Further-out earnings dates are under Research.'}</li>`;
     const th=S.econ?.through||{};$('econNote').textContent=th.cpi?`Earnings dates come from Alpha Vantage; economic events from the Fed, BLS, BEA, Census and NYSE schedules, loaded through ${dlabel(th.cpi)} ${th.cpi.slice(0,4)} for the Fed, CPI, jobs and PPI and ${dlabel(th.gdp)} ${th.gdp.slice(0,4)} for GDP, PCE and retail sales.`:'';
   }
   if(pr.length){const an=S.an,sec=an?.sectors?.[0],c=an?.correlation,con=an?.concentration;

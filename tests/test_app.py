@@ -581,6 +581,9 @@ def test_economic_calendar(client):
     fed = [e for e in ev if e["kind"] == "fomc"]
     assert len(fed) == 16 and fed[1]["date"] == "2026-03-18" and "projections" in fed[1]["detail"]
     assert next(e for e in ev if e["date"] == "2026-11-10" and e["kind"] == "cpi")["detail"] == "October 2026 data, 8:30 AM ET"
+    sept = {(e["kind"], e["date"]) for e in econ.upcoming(dt.date(2026, 10, 13))}
+    assert {("cpi", "2026-10-14"), ("ppi", "2026-10-15"), ("retail", "2026-10-15")} <= sept   # the September data
+    assert max(e["days"] for e in econ.upcoming(dt.date(2026, 10, 13))) <= 14
     up = econ.upcoming(dt.date(2026, 10, 27), 7)
     assert [(e["date"], e["kind"], e["days"]) for e in up] == [("2026-10-28", "fomc", 1), ("2026-10-29", "gdp", 2), ("2026-10-29", "pce", 2)]
     assert econ.upcoming(dt.date(2030, 1, 1)) == []
