@@ -164,7 +164,7 @@ td.l,th.l{text-align:left}
 th[data-s]{cursor:pointer;user-select:none} th[data-s]:hover{color:var(--ink)}
 th[aria-sort="ascending"]::after{content:" \25B2";font-size:9px} th[aria-sort="descending"]::after{content:" \25BC";font-size:9px}
 .sent{display:inline-block;font-size:11px;font-weight:600;padding:1px 6px;border-radius:4px;background:var(--sunk);color:var(--muted);white-space:nowrap}
-.sent.up{background:var(--up-bg);color:var(--up)} .sent.dn{background:var(--dn-bg);color:var(--dn)}
+.sent.up{background:var(--up-bg);color:var(--up)} .sent.dn{background:var(--dn-bg);color:var(--dn)} .sent.warn{background:var(--warn-bg);color:var(--warn)}
 .meter{display:inline-block;width:40px;height:6px;background:var(--line);border-radius:3px;vertical-align:middle;margin-right:6px;overflow:hidden}
 .meter i{display:block;height:100%;background:var(--accent)}
 .bars{display:grid;grid-template-columns:auto minmax(60px,1fr) auto;gap:10px 12px;align-items:center}
@@ -244,8 +244,9 @@ th[aria-sort="ascending"]::after{content:" \25B2";font-size:9px} th[aria-sort="d
     </section>
     <div class="two">
       <section class="panel">
-        <div class="ph"><h2>Upcoming earnings</h2><span class="mut" style="font-size:12px">Holdings and watchlist, next three months</span></div>
+        <div class="ph"><h2>Upcoming earnings and economic events</h2><span class="mut" style="font-size:12px">Holdings, watchlist, Fed decisions and the main US data releases</span></div>
         <ul class="rowlist" id="upEarn"><li style="display:block" class="empty">Earnings dates load with the market data.</li></ul>
+        <p class="note" id="econNote" style="margin:0;padding:10px 16px"></p>
       </section>
       <section class="panel">
         <div class="ph"><h2>Book at a glance</h2></div>
@@ -322,7 +323,7 @@ th[aria-sort="ascending"]::after{content:" \25B2";font-size:9px} th[aria-sort="d
       <div class="scroll"><table id="cons"><tbody><tr><td class="empty">Targets load with the market data.</td></tr></tbody></table></div>
     </section>
     <section class="panel">
-      <div class="ph"><h2>News by holding</h2><div class="pills" id="newsPills"></div></div>
+      <div class="ph"><h2>News</h2><div class="pills" id="newsPills"></div></div>
       <div id="news"><div class="empty">News loads with the market data.</div></div>
     </section>
   </div>
@@ -458,9 +459,11 @@ const sentCls=l=>/bull/i.test(l||'')?'up':/bear/i.test(l||'')?'dn':'';
 const sentChip=n=>n.label?`<span class="sent ${sentCls(n.label)}">${esc(String(n.label).replace(/-/g,' '))}</span>`:'';
 const tone=v=>v>=.35?'Bullish':v>=.15?'Somewhat bullish':v>-.15?'Neutral':v>-.35?'Somewhat bearish':'Bearish';
 const CSSV=()=>{const css=getComputedStyle(document.documentElement);return n=>css.getPropertyValue(n).trim();};
-const byDate=(a,b)=>(b.date||'').localeCompare(a.date||'');
+const byDate=(a,b)=>(b.ts||b.date||'').localeCompare(a.ts||a.date||'');
+// Alpha Vantage stamps stories in UTC (20261007T211957): show them in local time.
+const ntime=n=>{const t=n.ts||'';if(t.length<13)return n.date?dlabel(n.date):'';const d=new Date(Date.UTC(+t.slice(0,4),+t.slice(4,6)-1,+t.slice(6,8),+t.slice(9,11),+t.slice(11,13)));return isNaN(d)?dlabel(n.date):MON[d.getMonth()]+' '+d.getDate()+', '+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});};
 const safeUrl=u=>/^https?:\/\//.test(u)?u:'#';
-const newsLi=(n,grouped)=>`<li>${grouped?`<span class="num mut" style="font-size:12px">${n.date?dlabel(n.date):''}</span>`:`<button type="button" class="link" data-t="${esc(n.ticker)}" style="font-size:12.5px;text-align:left">${esc(n.ticker)}</button>`}<span><a href="${esc(safeUrl(n.url))}" target="_blank" rel="noopener">${esc(n.title)}</a><div class="src">${esc(n.source||'')} ${sentChip(n)}</div></span><span class="num mut" style="font-size:12px">${grouped?'':n.date?dlabel(n.date):''}</span></li>`;
+const newsLi=(n,grouped)=>`<li>${grouped?`<span class="num mut" style="font-size:12px;white-space:nowrap">${ntime(n)}</span>`:`<button type="button" class="link" data-t="${esc(n.ticker)}" style="font-size:12.5px;text-align:left">${esc(n.ticker)}</button>`}<span><a href="${esc(safeUrl(n.url))}" target="_blank" rel="noopener">${esc(n.title)}</a><div class="src">${esc(n.source||'')} ${sentChip(n)}</div></span><span class="num mut" style="font-size:12px;white-space:nowrap">${grouped?'':ntime(n)}</span></li>`;
 const liveQ=(q0,lv)=>q0&&lv?{...q0,last:lv.last,prevClose:lv.prevClose,asOf:lv.day+' live',live:lv}:q0;
 
 // Any stock the page knows: a holding, a watchlist name, or one fetched on demand.
@@ -545,9 +548,18 @@ function rOverview(M){
       return `<button type="button" data-t="${esc(r.t)}" aria-label="${esc(r.t)}, ${pct(r.dayPct)} today, ${(r.w*100).toFixed(1)}% of the book" title="${esc(r.q.name||r.t)}: ${pct(r.dayPct)} today, ${(r.w*100).toFixed(1)}% of the book" style="left:${x.toFixed(1)}px;top:${y.toFixed(1)}px;width:${w.toFixed(1)}px;height:${h.toFixed(1)}px;background:color-mix(in srgb,var(${col}) ${k}%,var(--surface));font-size:${small?11:14}px;${small?'padding:3px 5px':''}"><b>${esc(r.t)}</b><span>${pct(r.dayPct)}</span>${small||h<66?'':`<small>${(r.w*100).toFixed(1)}% of book · ${susd(r.day)}</small>`}</button>`;}).join('');
   }else if(S.got.lots)box.innerHTML='<div class="empty">No priced holdings yet.</div>';
   const names=[...rows.map(r=>({t:r.t,q:r.q,held:true})),...watchRows().map(r=>({t:r.t,q:r.q}))].filter(x=>x.q?.earn?.next).sort((a,b)=>a.q.earn.next.date.localeCompare(b.q.earn.next.date));
-  if(S.got.lots)$('upEarn').innerHTML=names.length?names.slice(0,8).map(x=>{const e=x.q.earn.next,n=daysTo(e.date),last=x.q.earn.hist?.[0];
-    return `<li><span><button type="button" class="link" data-t="${esc(x.t)}">${esc(x.t)}</button>${x.held?'':' <span class="sent">watchlist</span>'}</span><span class="num ${n<=3?'':'mut'}" style="font-weight:${n<=3?600:400}">${fdate(e.date)} · ${when(n)}</span><span class="d">${esc([sess(e.time),e.est!=null?'EPS estimate '+nf(e.est):'',last?.surp!=null?`last quarter ${last.surp>=0?'beat':'missed'} by ${nf(Math.abs(last.surp),1)}%`:''].filter(Boolean).join(' · ')||'No estimate published yet')}</span></li>`;}).join('')
-    :`<li style="display:block" class="empty">${S.feeds?.ecal?.state==='failed'?'The earnings calendar is not available from the data provider right now.':'No report dates scheduled in the next three months.'}</li>`;
+  if(S.got.lots){
+    const ER=names.slice(0,8).map(x=>{const e=x.q.earn.next,last=x.q.earn.hist?.[0];return {date:e.date,earn:x,sub:[sess(e.time),e.est!=null?'EPS estimate '+nf(e.est):'',last?.surp!=null?`last quarter ${last.surp>=0?'beat':'missed'} by ${nf(Math.abs(last.surp),1)}%`:''].filter(Boolean).join(' · ')||'No estimate published yet'};});
+    const horizon=ER.length?ER[ER.length-1].date:'9',EC=(S.econ?.events||[]).filter(e=>e.date<=horizon||ER.length<3);
+    const all=[...ER,...EC.map(e=>({date:e.date,ev:e,sub:e.detail}))].sort((a,b)=>a.date.localeCompare(b.date)||(a.ev?1:-1)).slice(0,18);
+    const KC={fomc:'warn',closed:'dn',early:'dn'};
+    $('upEarn').innerHTML=all.length?all.map(x=>{const n=daysTo(x.date),soon=n<=3;
+      const who=x.earn?`<button type="button" class="link" data-t="${esc(x.earn.t)}">${esc(x.earn.t)}</button>${x.earn.held?'':' <span class="sent">watchlist</span>'}`
+        :`<span style="font-weight:600">${esc(x.ev.title)}</span> <span class="sent ${KC[x.ev.kind]||''}">${esc(x.ev.kind==='fomc'?'Fed':x.ev.kind==='closed'||x.ev.kind==='early'?'Holiday':'US data')}</span>`;
+      return `<li><span>${who}</span><span class="num ${soon?'':'mut'}" style="font-weight:${soon?600:400}">${fdate(x.date)} · ${when(n)}</span><span class="d">${esc(x.sub)}</span></li>`;}).join('')
+      :`<li style="display:block" class="empty">${S.feeds?.ecal?.state==='failed'?'The earnings calendar is not available from the data provider right now.':'Nothing scheduled in the next three months.'}</li>`;
+    const th=S.econ?.through||{};$('econNote').textContent=th.cpi?`Earnings dates come from Alpha Vantage; economic events from the Fed, BLS, BEA, Census and NYSE schedules, loaded through ${dlabel(th.cpi)} ${th.cpi.slice(0,4)} for the Fed, CPI, jobs and PPI and ${dlabel(th.gdp)} ${th.gdp.slice(0,4)} for GDP, PCE and retail sales.`:'';
+  }
   if(pr.length){const an=S.an,sec=an?.sectors?.[0],c=an?.correlation,con=an?.concentration;
     $('glance').innerHTML=[['Expected 12-month return',pct(T.e12,1),cls(T.e12),T.e12!=null?`${susd(T.mv*T.e12)} at consensus price targets`:'No targets loaded'],
       ['Portfolio beta',nf(T.beta5),'','Weighted 5-year beta at current weights'],
@@ -719,9 +731,10 @@ function rResearch(M){
     if(S.newsF!=='ALL'&&!tks.includes(S.newsF))S.newsF='ALL';
     $('newsPills').innerHTML=['ALL',...tks].map(k=>`<button type="button" data-k="${esc(k)}" aria-pressed="${S.newsF===k}">${k==='ALL'?'All':esc(k)}</button>`).join('');
     const show=tks.filter(t=>S.newsF==='ALL'||t===S.newsF);
-    $('news').innerHTML=show.length?show.map(t=>{const li=items.filter(n=>n.ticker===t).sort(byDate),sc=li.map(n=>n.sent).filter(v=>v!=null),avg=sc.length?sum(sc,v=>v)/sc.length:null;
-      return `<div class="grp"><button type="button" class="link" data-t="${esc(t)}">${esc(t)}</button><span>${li.length} stor${li.length===1?'y':'ies'}</span>${avg!=null?`<span>Average tone <span class="sent ${sentCls(tone(avg))}">${tone(avg)}</span> <span class="num">${avg>0?'+':''}${avg.toFixed(2)}</span></span>`:''}</div><ul class="news">${li.map(n=>newsLi(n,true)).join('')}</ul>`;}).join('')
-      :'<div class="empty">No stories loaded for these holdings yet.</div>';
+    // "All" is one list, newest story first across the whole book; a ticker shows that company's stories.
+    $('news').innerHTML=S.newsF==='ALL'?(items.length?`<ul class="news">${[...items].sort(byDate).map(n=>newsLi(n)).join('')}</ul>`:'<div class="empty">No stories loaded for these holdings yet.</div>')
+      :show.map(t=>{const li=items.filter(n=>n.ticker===t).sort(byDate),sc=li.map(n=>n.sent).filter(v=>v!=null),avg=sc.length?sum(sc,v=>v)/sc.length:null;
+      return `<div class="grp"><button type="button" class="link" data-t="${esc(t)}">${esc(t)}</button><span>${li.length} stor${li.length===1?'y':'ies'}</span>${avg!=null?`<span>Average tone <span class="sent ${sentCls(tone(avg))}">${tone(avg)}</span> <span class="num">${avg>0?'+':''}${avg.toFixed(2)}</span></span>`:''}</div><ul class="news">${li.map(n=>newsLi(n,true)).join('')}</ul>`;}).join('');
   }
 }
 
@@ -1107,7 +1120,7 @@ async function api(path,opt){
   return body;
 }
 function apply(st){
-  S.lots=st.lots||[];S.canWrite=!!st.canWrite;S.live=st.live||{};S.news=st.news||[];S.watchList=st.watchlist||[];S.feeds=st.feeds||{};
+  S.lots=st.lots||[];S.canWrite=!!st.canWrite;S.live=st.live||{};S.news=st.news||[];S.watchList=st.watchlist||[];S.feeds=st.feeds||{};S.econ=st.econ||null;
   S.watch={};for(const [k,v] of Object.entries(st.watch||{}))S.watch[k]={...v,hist:H[k]};
   if(st.build){if(S.build&&S.build.number!==st.build.number){location.reload();return;}   // a new build was deployed: load it
     S.build=st.build;$('build').textContent=`Build ${st.build.number}${st.build.commit?' ('+st.build.commit+')':''} · running since ${new Date(st.build.started*1000).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}`;}

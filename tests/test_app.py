@@ -408,6 +408,7 @@ def test_earnings_valuation_and_earnings_alerts(client, monkeypatch):
     assert len(q["earn"]["hist"]) == 4 and q["earn"]["hist"][0]["eps"] == 1.0
     assert q["earn"]["next"]["days"] >= 0 and q["earn"]["next"]["date"] and q["est"]["fy1"]["eps"] == 8.0
     assert st["news"][0]["label"] and st["feeds"]["earn"]["state"] == "ok" and st["dataVersion"]
+    assert st["news"][0]["ts"].startswith("2026100") and "T" in st["news"][0]["ts"]   # the page sorts "All" news by this
 
     # holdings that report within the alert window get one alert each, with a push
     days = {t: st["quotes"][t]["earn"]["next"]["days"] for t in held}
@@ -567,3 +568,23 @@ def test_screen_loads_members_and_survives_a_missing_feed(client):
     assert a["ready"] and len(a["attribution"]) == len(held) and len(a["correlation"]["matrix"]) == len(held)
     assert {p["key"] for p in a["periods"]} >= {"1M", "YTD", "1Y"} and abs(sum(s["weight"] for s in a["sectors"]) - 1) < 1e-3
     assert a["backcast"]["drawdown"]["pct"] <= 0 and a["backcast"]["vol"] > 0
+
+
+def test_economic_calendar(client):
+    import datetime as dt
+    from app import econ
+    ev = econ.events()
+    assert len({e["date"] + e["kind"] for e in ev}) == len(ev) and ev == sorted(ev, key=lambda e: e["date"])
+    for e in ev:
+        dt.date.fromisoformat(e["date"])                    # every date parses
+        assert e["kind"] in econ.KINDS and e["title"] and e["detail"]
+    fed = [e for e in ev if e["kind"] == "fomc"]
+    assert len(fed) == 16 and fed[1]["date"] == "2026-03-18" and "projections" in fed[1]["detail"]
+    assert next(e for e in ev if e["date"] == "2026-11-10" and e["kind"] == "cpi")["detail"] == "October 2026 data, 8:30 AM ET"
+    up = econ.upcoming(dt.date(2026, 10, 27), 7)
+    assert [(e["date"], e["kind"], e["days"]) for e in up] == [("2026-10-28", "fomc", 1), ("2026-10-29", "gdp", 2), ("2026-10-29", "pce", 2)]
+    assert econ.upcoming(dt.date(2030, 1, 1)) == []
+    assert econ.coverage()["cpi"] == "2027-12-10"
+    client.post("/login", data={"password": "view-pass"})
+    st = client.get("/api/state").json()
+    assert st["econ"]["through"]["fomc"] == "2027-12-08" and all(e["days"] >= 0 for e in st["econ"]["events"])

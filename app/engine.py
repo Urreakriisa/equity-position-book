@@ -8,7 +8,7 @@ import logging
 import time
 from zoneinfo import ZoneInfo
 
-from . import analytics, build, ideas
+from . import analytics, build, econ, ideas
 from .av import AVError
 from .store import Store
 
@@ -433,7 +433,7 @@ class Engine:
                          "ma200": sma(closes, 200) or ov.get("ma200")}
             if (lv := self._live(s)):
                 live[s] = lv
-            news += [{k: n.get(k) for k in ("ticker", "title", "source", "url", "date", "sent", "label")}
+            news += [{k: n.get(k) for k in ("ticker", "title", "source", "url", "date", "ts", "sent", "label")}
                      for n in (self.store.get(f"news:{s}") or {}).get("items", [])]
         idx, tape = {}, []
         for code, (name, etf) in INDEX_ETFS.items():
@@ -470,6 +470,7 @@ class Engine:
                        "rates": {"tbill3m": rates.get("tbill3m"), "asOf": rates.get("asOf")},
                        "meta": {"updated": max(stamps) if stamps else None}},
             "alerts": self.alerts(),
+            "econ": {"events": econ.upcoming(now_ny().date()), "through": econ.coverage()},
             "alertEvents": [e for e in (self.store.get("alert_events") or {}).get("items", [])
                             if e["ticker"] in held or e["ticker"] in watchlist][-30:],
             "canWrite": can_write, "delayed": self.delayed, "histVersion": version,
