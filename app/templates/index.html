@@ -901,12 +901,17 @@ function analyze(h){
     if(dep<.07||dep>.45||B.i-a.i<8)continue;
     if(B.i-a.i>1&&mxI(a.i+1,B.i-1).y>a.y*1.02)continue;
     if(a.y<mnI(Math.max(0,a.i-40),a.i).y*1.08)continue;
-    const R=mxI(B.i+1,last);if(R.i-B.i<8)continue;
+    const R=mxI(B.i+1,last);if(R.i-B.i<8||R.i-a.i<30)continue;   // a cup takes at least six weeks; shorter is a V
+    // The right side must hold: once price has recovered 60% of the depth, a later drop of more than a
+    // third of the depth breaks the cup (a second leg down is a W or a failed base, not a rounded bottom).
+    let broken=false,peak=null;const dp=a.y-B.y;
+    for(let i=B.i+1;i<=R.i;i++){if(peak==null){if(H[i]>=B.y+.6*dp)peak=H[i];continue;}peak=Math.max(peak,H[i]);if(L[i]<peak-dp/3){broken=true;break;}}
+    if(broken)continue;
     let c2=null;
     if(R.y>=a.y*.95&&R.y<=a.y*1.05&&last-R.i<=30){
       const fr=(B.i-a.i)/(R.i-a.i);if(fr<.2||fr>.8)continue;
       const hl=R.i<=last-3?mnI(R.i+1,last).y:null;
-      if(hl!=null&&hl<R.y-.5*(R.y-B.y))continue;
+      if(hl!=null&&hl<R.y-dp/3)continue;              // the handle fell too far: the setup is broken
       c2={a,B,R,dep,hl,done:true};
     }else if(R.y<a.y*.95&&last-B.i>=8&&last-R.i<=5&&C>=R.y*.97&&(R.y-B.y)/(a.y-B.y)>=.33){
       c2={a,B,R,dep,hl:null,done:false};
@@ -962,8 +967,8 @@ function drawCandles(r,box,hd,C,taEl){
     <div class="pills">${Object.keys(RNG).map(k=>`<button type="button" data-r="${k}" aria-pressed="${S.range===k}">${k}</button>`).join('')}</div></div>`;
   const bc=b=>b==='Bullish'?'add':b==='Bearish'?'drop':'',tc=ta.state==='Uptrend'?'add':ta.state==='Downtrend'?'drop':'';
   (taEl||$('ta')).innerHTML=`<div class="ta"><div class="row"><span class="act ${tc}">${ta.state}</span><span>${ta.trend.length?'Last close is '+esc(ta.trend.join('; '))+'.':'Not enough history for moving averages yet.'}</span></div>`+
-    (ta.pats.length?ta.pats.map(p=>`<div class="row"><span class="act ${bc(p.bias)}">${esc(p.name)} · ${esc(p.status)}</span><span>${esc(p.bias)}. ${esc(p.text)}${p.target!=null&&p.target>0?` Measured move points to about ${nf(p.target)}.`:''}</span></div>`).join(''):`<div class="row"><span class="act">No formation</span><span>None of the ten formations screened is active on ${esc(r.t)}.</span></div>`)+
-    `<div class="note">Screened: head and shoulders, inverse head and shoulders, double top, double bottom, ascending, descending and symmetrical triangles, wedges, flags, cup and handle. Detection is rule-based on swing highs and lows through the last close (${dlabel(h0.d[h0.d.length-1])}); treat a hit as a prompt to look at the chart, not a trading signal.</div></div>`;
+    (ta.pats.length?ta.pats.map(p=>`<div class="row"><span class="act ${bc(p.bias)}">${esc(p.name)} · ${esc(p.status)}</span><span>${esc(p.bias)}. ${esc(p.text)}${p.target!=null&&p.target>0?` Measured move points to about ${nf(p.target)}.`:''}</span></div>`).join(''):`<div class="row"><span class="act">No formation</span><span>None of the ten formations screened is active on ${esc(r.t)} through ${dlabel(h0.d[h0.d.length-1])}. Rule-based; not a trading signal.</span></div>`)+
+    `</div>`;
 }
 
 // ---------- interactions
