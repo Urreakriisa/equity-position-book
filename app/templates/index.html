@@ -384,7 +384,7 @@ th[aria-sort="ascending"]::after{content:" \25B2";font-size:9px} th[aria-sort="d
 </dialog>
 
 <script>
-const S={lots:[],quotes:{},news:[],market:{},watch:{},idx:{},isel:'SPX',live:{},delayed:true,note:'',alerts:{default:null,watchDefault:null,by:{}},events:[],wsel:null,adhoc:null,got:{},sel:null,view:'stock',range:'6M',newsF:'ALL',open:null,canWrite:false,tab:'overview',sort:{k:'mv',d:-1},look:{},lookErr:{},detail:null,an:null,ideas:null,ideasErr:'',feeds:{},pview:null};
+const S={lots:[],quotes:{},news:[],market:{},watch:{},idx:{},isel:'SPX',live:{},delayed:true,note:'',alerts:{default:null,watchDefault:null,by:{}},events:[],wsel:null,adhoc:null,got:{},sel:null,view:'stock',range:'6M',newsF:'ALL',open:null,canWrite:false,tab:'overview',sort:{k:'mv',d:-1},look:{},lookErr:{},intra:{},intraReq:{},detail:null,an:null,ideas:null,ideasErr:'',feeds:{},pview:null};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const nf=(v,d=2)=>v==null||!isFinite(v)?'—':v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -766,6 +766,16 @@ async function loadIdeas(force){
   if(S.tab==='ideas')render();
 }
 
+// Hourly bars for the 1-month chart, kept for half an hour.
+async function loadIntra(t){
+  if(S.intraReq[t]&&Date.now()-S.intraReq[t]<60000)return;S.intraReq[t]=Date.now();
+  try{const r=await api('/api/intraday?symbol='+encodeURIComponent(t));S.intra[t]={...r,at:Date.now()};}
+  catch(e){S.intra[t]={d:[],err:e.message||'no data',at:Date.now()};}
+  if(S.range!=='1M')return;
+  if($('sdlg').open&&S.detail===t)renderDetail();
+  if(S.tab==='chart')drawChart(model());
+}
+
 // ---------- Stock detail
 async function fetchLook(t){
   try{const r=await api('/api/lookup?symbol='+encodeURIComponent(t));S.look[r.symbol]={t:r.symbol,q:{...r.quote,hist:r.hist},live:r.live,at:Date.now()};delete S.lookErr[t];}
@@ -929,9 +939,13 @@ function analyze(h){
 function drawCandles(r,box,hd,C,taEl){
   const q=r.q,h0=q.hist,ta=analyze(h0),tv=q.live;let h=h0;
   if(tv&&tv.day>h0.d[h0.d.length-1]&&tv.o>0)h={d:[...h0.d,tv.day],o:[...(h0.o||h0.c),tv.o],h:[...(h0.h||h0.c),Math.max(tv.h||0,tv.o,tv.last)],l:[...(h0.l||h0.c),Math.min(tv.l||1e99,tv.o,tv.last)],c:[...h0.c,tv.last]};
+  // The 1-month view uses hourly bars, fetched on demand; daily bars show until they arrive.
+  const ia=S.range==='1M'?S.intra[r.t]:null,HR=!!(ia&&ia.d&&ia.d.length>1);
+  if(S.range==='1M'&&(!ia||Date.now()-ia.at>1800000))loadIntra(r.t);
+  if(HR)h=ia;
   const n=h.d.length,O=h.o||h.c,Hh=h.h||h.c,Ll=h.l||h.c,cl=h.c;
-  const vis=Math.min(n,RNG[S.range]||126),s=n-vis,W=Math.max(300,box.clientWidth||600),H=340,m={l:6,r:62,t:14,b:24};
-  let lo=1e99,hi=-1e99;for(let i=s;i<n;i++){lo=Math.min(lo,Ll[i]);hi=Math.max(hi,Hh[i]);for(const a of [ta.ma50[i],ta.ma200[i]])if(a!=null){lo=Math.min(lo,a);hi=Math.max(hi,a);}}
+  const vis=HR?n:Math.min(n,RNG[S.range]||126),s=n-vis,W=Math.max(300,box.clientWidth||600),H=340,m={l:6,r:62,t:14,b:24};
+  let lo=1e99,hi=-1e99;for(let i=s;i<n;i++){lo=Math.min(lo,Ll[i]);hi=Math.max(hi,Hh[i]);for(const a of (HR?[]:[ta.ma50[i],ta.ma200[i]]))if(a!=null){lo=Math.min(lo,a);hi=Math.max(hi,a);}}
   const showEntry=r.avg>lo*.85&&r.avg<hi*1.15;if(showEntry){lo=Math.min(lo,r.avg);hi=Math.max(hi,r.avg);}
   if(q.last!=null){lo=Math.min(lo,q.last);hi=Math.max(hi,q.last);}
   const pad=(hi-lo)*.06||1;lo-=pad;hi+=pad;
@@ -939,31 +953,35 @@ function drawCandles(r,box,hd,C,taEl){
   const raw=(hi-lo)/5,mag=Math.pow(10,Math.floor(Math.log10(raw))),step=[1,2,2.5,5,10].map(k=>k*mag).find(k=>k>=raw),fy=v=>nf(v,hi<100?2:0);
   let g=`<defs><clipPath id="plot"><rect x="${m.l}" y="${m.t}" width="${pw}" height="${H-m.t-m.b}"/></clipPath></defs>`;
   for(let v=Math.ceil(lo/step)*step;v<=hi;v+=step)g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="${C('--line')}" stroke-width="1"/><text x="${W-m.r+8}" y="${Y(v)+4}" fill="${C('--muted')}" font-size="11" font-family="IBM Plex Mono,monospace">${fy(v)}</text>`;
-  for(let k=0;k<5;k++){const i=s+Math.round((vis-1)*k/4);g+=`<text x="${X(i)}" y="${H-6}" fill="${C('--muted')}" font-size="11" text-anchor="${k===0?'start':k===4?'end':'middle'}" font-family="Archivo,sans-serif">${dlabel(h.d[i])}${vis>200?" '"+h.d[i].slice(2,4):''}</text>`;}
+  if(HR){const starts=[];for(let i=s;i<n;i++)if(i===s||h.d[i].slice(0,10)!==h.d[i-1].slice(0,10))starts.push(i);
+    const every=Math.max(1,Math.ceil(starts.length/6));
+    starts.forEach((i,j)=>{if(i>s)g+=`<line x1="${(X(i)-pw/vis/2).toFixed(1)}" x2="${(X(i)-pw/vis/2).toFixed(1)}" y1="${m.t}" y2="${H-m.b}" stroke="${C('--line')}" stroke-width="1"/>`;
+      if(j%every===0)g+=`<text x="${X(i)}" y="${H-6}" fill="${C('--muted')}" font-size="11" text-anchor="start" font-family="Archivo,sans-serif">${dlabel(h.d[i])}</text>`;});}
+  else for(let k=0;k<5;k++){const i=s+Math.round((vis-1)*k/4);g+=`<text x="${X(i)}" y="${H-6}" fill="${C('--muted')}" font-size="11" text-anchor="${k===0?'start':k===4?'end':'middle'}" font-family="Archivo,sans-serif">${dlabel(h.d[i])}${vis>200?" '"+h.d[i].slice(2,4):''}</text>`;}
   if(showEntry)g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(r.avg)}" y2="${Y(r.avg)}" stroke="${C('--muted')}" stroke-width="1" stroke-dasharray="4 4"/><text x="${m.l+4}" y="${Y(r.avg)-5}" fill="${C('--muted')}" font-size="11" font-family="Archivo,sans-serif">Entry ${nf(r.avg)}</text>`;
   const up=C('--up'),dn=C('--dn'),sf=C('--surface');
   for(let i=s;i<n;i++){const u=cl[i]>=O[i],col=u?up:dn,x=X(i),y1=Y(Math.max(O[i],cl[i])),y2=Y(Math.min(O[i],cl[i]));
     g+=`<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${Y(Hh[i]).toFixed(1)}" y2="${Y(Ll[i]).toFixed(1)}" stroke="${col}" stroke-width="1"/><rect x="${(x-cw/2).toFixed(1)}" y="${y1.toFixed(1)}" width="${cw.toFixed(1)}" height="${Math.max(1,y2-y1).toFixed(1)}" fill="${u&&cw>3?sf:col}" stroke="${col}" stroke-width="1"/>`;}
   const path=a=>{let p='',on=false;for(let i=s;i<n;i++){if(a[i]==null){on=false;continue;}p+=(on?'L':'M')+X(i).toFixed(1)+' '+Y(a[i]).toFixed(1);on=true;}return p;};
-  g+=`<path d="${path(ta.ma50)}" fill="none" stroke="${C('--accent')}" stroke-width="1.75" stroke-linejoin="round"/><path d="${path(ta.ma200)}" fill="none" stroke="${C('--bench')}" stroke-width="1.75" stroke-linejoin="round"/>`;
-  g+=`<g clip-path="url(#plot)">`+ta.pats.map(p=>{
+  if(!HR)g+=`<path d="${path(ta.ma50)}" fill="none" stroke="${C('--accent')}" stroke-width="1.75" stroke-linejoin="round"/><path d="${path(ta.ma200)}" fill="none" stroke="${C('--bench')}" stroke-width="1.75" stroke-linejoin="round"/>`;
+  if(!HR)g+=`<g clip-path="url(#plot)">`+ta.pats.map(p=>{
     let pg=p.lines.map(l=>`<line x1="${X(l[0])}" y1="${Y(l[1])}" x2="${X(l[2])}" y2="${Y(l[3])}" stroke="${C('--ink')}" stroke-width="1.5" stroke-dasharray="6 4"/>`).join('');
     if(p.curve){const [p0,p1,p2]=p.curve,cx=2*X(p1[0])-(X(p0[0])+X(p2[0]))/2,cy=2*Y(p1[1])-(Y(p0[1])+Y(p2[1]))/2;
       pg+=`<path d="M ${X(p0[0]).toFixed(1)} ${Y(p0[1]).toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(1)} ${X(p2[0]).toFixed(1)} ${Y(p2[1]).toFixed(1)}" fill="none" stroke="${C('--ink')}" stroke-width="2.25" stroke-dasharray="1 5" stroke-linecap="round" opacity=".9"/>`;}
     return pg;}).join('')+`</g>`;
-  ta.pats.forEach(p=>{const l=p.lines[0];g+=`<text x="${X(l[2])-4}" y="${Math.max(m.t+10,Y(l[3])-6)}" fill="${C('--ink')}" font-size="11" font-weight="700" text-anchor="end" font-family="Archivo,sans-serif" stroke="${sf}" stroke-width="3" paint-order="stroke">${esc(p.name)}</text>`;});
+  if(!HR)ta.pats.forEach(p=>{const l=p.lines[0];g+=`<text x="${X(l[2])-4}" y="${Math.max(m.t+10,Y(l[3])-6)}" fill="${C('--ink')}" font-size="11" font-weight="700" text-anchor="end" font-family="Archivo,sans-serif" stroke="${sf}" stroke-width="3" paint-order="stroke">${esc(p.name)}</text>`;});
   if(q.last!=null)g+=`<rect x="${W-m.r+2}" y="${Y(q.last)-9}" width="${m.r-4}" height="18" rx="3" fill="${C('--ink')}"/><text x="${W-m.r+8}" y="${Y(q.last)+4}" fill="${sf}" font-size="11" font-family="IBM Plex Mono,monospace">${nf(q.last,q.last<1000?2:1)}</text>`;
   g+=`<line id="xh" y1="${m.t}" y2="${H-m.b}" stroke="${C('--muted')}" stroke-width="1" visibility="hidden"/>`;
-  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(r.t)} candlestick chart with 50 and 200 day moving averages">${g}<rect x="${m.l}" y="${m.t}" width="${pw}" height="${H-m.t-m.b}" fill="transparent"/></svg><div class="tip" hidden></div>`;
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(r.t)} ${HR?'hourly candlestick chart for the last month':'candlestick chart with 50 and 200 day moving averages'}">${g}<rect x="${m.l}" y="${m.t}" width="${pw}" height="${H-m.t-m.b}" fill="transparent"/></svg><div class="tip" hidden></div>`;
   const svg=box.firstChild,tip=box.lastChild,xh=svg.querySelector('#xh');
   const move=e=>{const b=svg.getBoundingClientRect(),sx=(e.clientX-b.left)*W/b.width,i=Math.max(s,Math.min(n-1,s+Math.floor((sx-m.l)/pw*vis)));
     xh.setAttribute('x1',X(i));xh.setAttribute('x2',X(i));xh.setAttribute('visibility','visible');tip.hidden=false;
-    tip.innerHTML=`<div style="opacity:.75">${dlabel(h.d[i])}, ${h.d[i].slice(0,4)}</div><div class="num">O ${nf(O[i])} &nbsp;H ${nf(Hh[i])}</div><div class="num">L ${nf(Ll[i])} &nbsp;C ${nf(cl[i])}</div>${ta.ma50[i]!=null?`<div><i style="background:${C('--accent')}"></i>50-day <span class="num">${nf(ta.ma50[i])}</span></div>`:''}${ta.ma200[i]!=null?`<div><i style="background:${C('--bench')}"></i>200-day <span class="num">${nf(ta.ma200[i])}</span></div>`:''}`;
+    tip.innerHTML=`<div style="opacity:.75">${dlabel(h.d[i])}, ${HR?'bar to '+h.d[i].slice(11,16)+' ET':h.d[i].slice(0,4)}</div><div class="num">O ${nf(O[i])} &nbsp;H ${nf(Hh[i])}</div><div class="num">L ${nf(Ll[i])} &nbsp;C ${nf(cl[i])}</div>${!HR&&ta.ma50[i]!=null?`<div><i style="background:${C('--accent')}"></i>50-day <span class="num">${nf(ta.ma50[i])}</span></div>`:''}${!HR&&ta.ma200[i]!=null?`<div><i style="background:${C('--bench')}"></i>200-day <span class="num">${nf(ta.ma200[i])}</span></div>`:''}`;
     const px=X(i)*b.width/W;tip.style.left=Math.max(80,Math.min(b.width-80,px))+'px';tip.style.top=Math.max(96,Y(Hh[i])*b.height/H)+'px';};
   svg.addEventListener('pointermove',move);svg.addEventListener('pointerdown',move);
   svg.addEventListener('pointerleave',()=>{tip.hidden=true;xh.setAttribute('visibility','hidden');});
   hd.innerHTML=`<span class="big num">${nf(q.last)}</span><span class="num ${cls(r.dayPct)}">${pct(r.dayPct)} ${r.idx?'on '+dlabel((q.asOf||'').slice(0,10)):'today'}${q.live&&S.delayed?' · 15-min delayed':''}</span><span class="mut">${esc(q.name||r.t)}</span>
-    <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between"><div class="legend"><span><i style="background:${C('--accent')}"></i>50-day average</span><span><i style="background:${C('--bench')}"></i>200-day average</span><span>Hollow candle: up day. Filled: down day.</span></div>
+    <div style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between"><div class="legend">${HR?`<span>Hourly candles, regular session, times in US Eastern.</span><span>Averages and formations below are from daily closes.</span>`:S.range==='1M'?`<span class="mut">${ia?.err?'Hourly bars are not available: '+esc(ia.err):'Loading hourly bars…'}</span>`:`<span><i style="background:${C('--accent')}"></i>50-day average</span><span><i style="background:${C('--bench')}"></i>200-day average</span><span>Hollow candle: up day. Filled: down day.</span>`}</div>
     <div class="pills">${Object.keys(RNG).map(k=>`<button type="button" data-r="${k}" aria-pressed="${S.range===k}">${k}</button>`).join('')}</div></div>`;
   const bc=b=>b==='Bullish'?'add':b==='Bearish'?'drop':'',tc=ta.state==='Uptrend'?'add':ta.state==='Downtrend'?'drop':'';
   (taEl||$('ta')).innerHTML=`<div class="ta"><div class="row"><span class="act ${tc}">${ta.state}</span><span>${ta.trend.length?'Last close is '+esc(ta.trend.join('; '))+'.':'Not enough history for moving averages yet.'}</span></div>`+

@@ -26,7 +26,7 @@ UNIVERSE_ETFS = ("SPY", "QQQ")        # the screen covers what these two hold
 WEEK = 7 * 24 * 3600
 FEEDS = {"quote": "Prices", "hist": "Price history", "ov": "Fundamentals and targets", "news": "News",
          "rates": "Treasury yield", "earn": "Earnings history", "ecal": "Earnings calendar",
-         "est": "Earnings estimates", "etf": "Index members"}
+         "est": "Earnings estimates", "etf": "Index members", "intra": "Hourly prices"}
 PRESET_WATCH = ["STX", "MU", "IREN", "USAR", "META", "BABA", "STRL", "TSM", "TTMI", "SIMO"]
 
 
@@ -369,6 +369,20 @@ class Engine:
                 raise AVError("too little history")
             return {"rows": rows[-HIST_ROWS:]}
         await self._fresh("hist", sym, 0, load)
+
+    async def intraday(self, sym: str) -> dict:
+        """Hourly bars for the last month, for the 1M chart. Fetched when asked
+        for and kept half an hour while the market is open, six hours otherwise."""
+        if self.av is None:
+            raise AVError("Market data is off")
+        async def load(s):
+            return {"rows": (await self.av.intraday(s))[-200:]}
+        await self._fresh("intra", sym, 1800 if market_open() else 6 * 3600, load, quiet=True)
+        rows = (self.store.get(f"intra:{sym}") or {}).get("rows") or []
+        if len(rows) < 2:
+            raise AVError(f"No hourly data for {sym}")
+        return {"symbol": sym, "d": [r[0] for r in rows], "o": [r[1] for r in rows], "h": [r[2] for r in rows],
+                "l": [r[3] for r in rows], "c": [r[4] for r in rows]}
 
     async def lookup(self, sym: str) -> dict:
         """Price, history and consensus for any ticker, fetched on demand for

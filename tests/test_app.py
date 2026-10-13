@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import analytics, ideas
-from app.av import (AVError, parse_calendar, parse_daily, parse_earnings, parse_estimates, parse_etf,
+from app.av import (AVError, parse_calendar, parse_intraday, parse_daily, parse_earnings, parse_estimates, parse_etf,
                     parse_news, parse_overview, parse_quote, rating_label)
 from app.main import create_app
 from app.store import Store
@@ -591,3 +591,20 @@ def test_economic_calendar(client):
     client.post("/login", data={"password": "view-pass"})
     st = client.get("/api/state").json()
     assert st["econ"]["through"]["fomc"] == "2027-12-08" and all(e["days"] >= 0 for e in st["econ"]["events"])
+
+
+def test_hourly_bars_for_the_month_chart(client):
+    bar = lambda o, c: {"1. open": str(o), "2. high": str(max(o, c)), "3. low": str(min(o, c)), "4. close": str(c), "5. volume": "1"}
+    rows = parse_intraday({"Meta Data": {}, "Time Series (60min)": {
+        "2026-10-13 11:00:00": bar(101, 102), "2026-10-13 10:00:00": bar(100, 101), "2026-10-12 16:00:00": bar(99, 100)}})
+    assert [r[0] for r in rows] == ["2026-10-12 16:00", "2026-10-13 10:00", "2026-10-13 11:00"] and rows[-1][4] == 102
+    with pytest.raises(AVError):
+        parse_intraday({"Information": "x"})
+    assert client.get("/api/intraday?symbol=NVDA").status_code == 401
+    client.post("/login", data={"password": "view-pass"})
+    body = client.get("/api/intraday?symbol=nvda").json()
+    assert body["symbol"] == "NVDA" and len(body["c"]) == 154 and body["d"][-1].endswith(" 16:00") and body["h"][0] >= body["c"][0]
+    client.get("/api/intraday?symbol=NVDA")
+    assert sum(1 for c in client.fake.calls if c[0] == "intra") == 1           # cached between calls
+    assert client.get("/api/intraday?symbol=BADTICKER").status_code == 404
+    assert client.get("/api/intraday?symbol=1x").status_code == 400

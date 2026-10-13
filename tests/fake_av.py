@@ -59,6 +59,18 @@ class FakeAV:
         self.calls.append(("daily", sym))
         return [list(r) for r in self._rows(sym)]
 
+    async def intraday(self, sym):
+        self.calls.append(("intra", sym))
+        out = []
+        for day in self._rows(sym)[-22:]:
+            o, c = day[1], day[4]
+            for k, hour in enumerate(range(10, 17)):
+                p0 = o + (c - o) * k / 7
+                p1 = o + (c - o) * (k + 1) / 7
+                out.append([f"{day[0]} {hour:02d}:00", round(p0, 2), round(max(p0, p1) * 1.002, 2),
+                            round(min(p0, p1) * 0.998, 2), round(p1, 2)])
+        return out
+
     async def overview(self, sym):
         self.calls.append(("ov", sym))
         if sym in ("SPY", "DIA", "ONEQ", "IWM"):

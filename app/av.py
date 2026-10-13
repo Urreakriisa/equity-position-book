@@ -66,6 +66,24 @@ def parse_daily(data: dict) -> list[list]:
     return out
 
 
+def parse_intraday(data: dict) -> list[list]:
+    """TIME_SERIES_INTRADAY (60min) -> ascending [timestamp, o, h, l, c] for
+    regular-session bars. Timestamps are US Eastern, marking the end of each bar."""
+    series = next((v for k, v in data.items() if k.startswith("Time Series") and isinstance(v, dict)), None)
+    if not series:
+        raise AVError("no intraday series returned")
+    out = []
+    for ts in sorted(series):
+        r = series[ts]
+        o, h, l, c = (_f(r.get(k)) for k in ("1. open", "2. high", "3. low", "4. close"))
+        if None in (o, h, l, c) or min(o, h, l, c) <= 0:
+            continue
+        out.append([ts[:16], o, h, l, c])
+    if len(out) < 2:
+        raise AVError("too little intraday history")
+    return out
+
+
 def rating_label(sb: int, b: int, h: int, s: int, ss: int) -> str | None:
     """One consensus word from the analyst split. Strong Buy needs 80% of
     analysts at Buy or better; Buy needs 55%."""
@@ -267,6 +285,10 @@ class AlphaVantage:
     async def daily(self, symbol: str) -> list[list]:
         return parse_daily(await self._call(True, function="TIME_SERIES_DAILY_ADJUSTED",
                                             symbol=symbol, outputsize="full"))
+
+    async def intraday(self, symbol: str) -> list[list]:
+        return parse_intraday(await self._call(True, function="TIME_SERIES_INTRADAY", symbol=symbol,
+                                               interval="60min", outputsize="full", extended_hours="false"))
 
     async def overview(self, symbol: str) -> dict:
         return parse_overview(await self._call(function="OVERVIEW", symbol=symbol))
