@@ -351,6 +351,11 @@ th[aria-sort="ascending"]::after{content:" \25B2";font-size:9px} th[aria-sort="d
   <p class="note num" id="build" style="font-size:11.5px"></p>
 </div>
 
+<dialog id="cdlg" aria-labelledby="cdT" style="width:min(420px,calc(100vw - 24px))">
+  <div class="pb" style="display:flex;flex-direction:column;gap:14px"><div id="cdT" style="font-weight:600;font-size:15px"></div><div class="mut" id="cdS" style="font-size:13px"></div>
+  <div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" id="cdNo">Cancel</button><button type="button" id="cdYes" style="background:var(--dn);border-color:var(--dn);color:#fff">Delete</button></div></div>
+</dialog>
+
 <dialog id="sdlg" aria-labelledby="sdT">
   <div class="ph"><div style="min-width:0"><div class="tk" id="sdT" style="font-size:20px"></div><div class="mut" id="sdName" style="font-size:12.5px"></div></div><div style="display:flex;gap:8px;flex-wrap:wrap" id="sdAct"></div></div>
   <div class="sdbody" id="sdBody"></div>
@@ -989,6 +994,11 @@ function drawCandles(r,box,hd,C,taEl){
     `</div>`;
 }
 
+// ---------- confirm a deletion
+function confirmDelete(ticker,sub){return new Promise(res=>{const d=$('cdlg');$('cdT').textContent=`Are you sure you want to delete ${ticker}?`;$('cdS').textContent=sub||'';
+  const done=v=>{d.close();$('cdYes').onclick=$('cdNo').onclick=d.oncancel=null;res(v);};
+  $('cdYes').onclick=()=>done(true);$('cdNo').onclick=()=>done(false);d.oncancel=e=>{e.preventDefault();done(false);};d.showModal();$('cdNo').focus();});}
+
 // ---------- interactions
 $('tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)setTab(b.dataset.tab);});
 document.addEventListener('click',e=>{
@@ -999,6 +1009,7 @@ document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;i
 $('pos').addEventListener('click',e=>{const th=e.target.closest('th[data-s]');if(!th)return;const k=th.dataset.s;
   S.sort=S.sort.k===k?{k,d:-S.sort.d}:{k,d:k==='t'||k==='earn'?1:-1};try{localStorage.setItem('epb_sort',JSON.stringify(S.sort));}catch(x){}render();});
 $('watchT').addEventListener('click',async e=>{const rm=e.target.closest('[data-rm]');if(!rm)return;
+  if(!await confirmDelete(rm.dataset.rm,'It will be removed from the watchlist. Its price alerts go with it.'))return;
   rm.disabled=true;try{await saveWatch((S.watchList||[]).filter(t=>t!==rm.dataset.rm));if(S.wsel===rm.dataset.rm&&S.view==='watch')S.view='stock';}catch(x){$('wlErr').textContent=x.message||'Could not remove it.';rm.disabled=false;}});
 $('ideaT').addEventListener('click',async e=>{const b=e.target.closest('[data-add]');if(!b)return;
   b.disabled=true;b.textContent='Adding…';
@@ -1028,7 +1039,9 @@ function readDraft(){draft.forEach((l,i)=>{if(l.del||!$('l'+i+'t'))return;l.tick
 $('editBtn').addEventListener('click',()=>{draft=S.lots.map(l=>({...l})).sort((a,b)=>a.ticker.localeCompare(b.ticker)||(a.date||'').localeCompare(b.date||''));$('dErr').textContent='';drawDraft();$('dlg').showModal();});
 $('dClose').addEventListener('click',()=>$('dlg').close());
 $('dAdd').addEventListener('click',()=>{readDraft();draft.push({ticker:'',qty:'',cost:'',date:new Date().toISOString().slice(0,10)});drawDraft();const i=draft.length-1;$('l'+i+'t')?.focus();});
-$('dRows').addEventListener('click',e=>{const b=e.target.closest('[data-del]');if(!b)return;readDraft();draft[+b.dataset.del].del=true;drawDraft();});
+$('dRows').addEventListener('click',async e=>{const b=e.target.closest('[data-del]');if(!b)return;readDraft();const l=draft[+b.dataset.del],t=l.ticker||'this lot';
+  if(l.ticker&&!await confirmDelete(t,`This lot of ${nf(+String(l.qty).replace(/,/g,''),0)} shares bought ${l.date||''} will be removed from the portfolio when you save.`))return;
+  l.del=true;drawDraft();});
 $('dform').addEventListener('submit',async e=>{e.preventDefault();readDraft();const err=$('dErr');err.textContent='';
   for(const l of draft){if(l.del)continue;const q=+String(l.qty).replace(/,/g,''),c=+String(l.cost).replace(/,/g,'');
     if(!/^[A-Z][A-Z.\-]{0,7}$/.test(l.ticker)||!(q>0)||!(c>0)||!/^\d{4}-\d\d-\d\d$/.test(l.date)){err.textContent='Each lot needs a ticker, shares and entry price above zero, and a date.';return;}
