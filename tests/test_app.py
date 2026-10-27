@@ -640,7 +640,3 @@ def test_price_level_alerts_fire_once_and_clear(client, monkeypatch):
     client.engine._check_alert("NVDA", {**q, "last": round(last * 0.9, 2)})
     st = client.get("/api/state").json()
     assert "NVDA" not in st["alerts"]["price"] and len(sent) == 2 and "fell to" in sent[1][0]
-    # market headlines ride on the state for the commentary
-    asyncio.run(client.engine._fresh("mnews", "", 0, client.engine._load_market_news))
-    news = client.get("/api/state").json()["market"]["news"]
-    assert len(news) == 3 and news[0]["label"] and news[0]["url"].startswith("https://")

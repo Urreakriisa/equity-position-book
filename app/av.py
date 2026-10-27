@@ -222,21 +222,6 @@ def parse_etf(data: dict) -> list[str]:
     return out
 
 
-def parse_market_news(data: dict, limit: int = 8) -> list[dict]:
-    """NEWS_SENTIMENT by topic -> the latest market-wide stories with their
-    overall sentiment."""
-    items = []
-    for it in data.get("feed") or []:
-        url, title, tp = it.get("url"), it.get("title"), str(it.get("time_published") or "")
-        if not title or not str(url).startswith("http") or len(tp) < 8:
-            continue
-        items.append({"title": title, "source": it.get("source"), "url": url, "ts": tp,
-                      "date": f"{tp[:4]}-{tp[4:6]}-{tp[6:8]}", "sent": _f(it.get("overall_sentiment_score")),
-                      "label": it.get("overall_sentiment_label")})
-    items.sort(key=lambda x: x["ts"], reverse=True)
-    return items[:limit]
-
-
 class AlphaVantage:
     def __init__(self, key: str, entitlement: str = "delayed", rpm: int = 60):
         self.key = key
@@ -311,10 +296,6 @@ class AlphaVantage:
     async def news(self, symbol: str) -> list[dict]:
         return parse_news(await self._call(function="NEWS_SENTIMENT", tickers=symbol,
                                            limit=50, sort="LATEST"), symbol)
-
-    async def market_news(self) -> list[dict]:
-        return parse_market_news(await self._call(function="NEWS_SENTIMENT", topics="financial_markets,economy_macro",
-                                                  limit=50, sort="LATEST"))
 
     async def tbill(self) -> dict:
         data = await self._call(function="TREASURY_YIELD", interval="daily", maturity="3month")

@@ -239,10 +239,6 @@ th[aria-sort="ascending"]::after{content:" \25B2";font-size:9px} th[aria-sort="d
   <div class="tabpage" id="tab-overview">
     <section class="tape num" id="tape" aria-label="Market indexes"><div><b>MARKET INDEXES</b><span class="lv mut">Loading…</span></div></section>
     <section class="panel">
-      <div class="ph"><h2>Market commentary</h2><span class="mut" style="font-size:12px">Written by the app from today's prices, your book, the calendar and the news tone. Not advice</span></div>
-      <div class="pb" id="comment"><div class="empty">The commentary appears once prices load.</div></div>
-    </section>
-    <section class="panel">
       <div class="ph"><h2>Today's map</h2><span class="mut" style="font-size:12px">Each tile is a holding, sized by weight and coloured by today's move. Select one for its detail</span></div>
       <div class="heat" id="heat"><div class="empty">The map appears once prices load.</div></div>
     </section>
@@ -546,32 +542,8 @@ function chrome(M){
 }
 
 // ---------- Overview
-function commentary(M){
-  const {rows,pr,T}=M,ix=S.market.indexes?.list||[],g=k=>ix.find(x=>x.sym===k),spx=g('SPX'),ndq=g('IXIC'),dji=g('DJI'),rut=g('RUT');
-  if(!spx)return '';
-  const p=[],mv=x=>x?`${x.name.replace(/ \(.*\)$/,'')} ${pct(x.chgPct/100)}`:'';
-  const ups=[spx,ndq,dji,rut].filter(Boolean).filter(x=>x.chgPct>0).length,all=[spx,ndq,dji,rut].filter(Boolean).length,big=Math.max(...[spx,ndq].filter(Boolean).map(x=>Math.abs(x.chgPct)));
-  const tone=ups===all?(big>=1?'a broad rally':'a quiet, positive session'):ups===0?(big>=1?'a broad sell-off':'a soft session'):'a mixed session';
-  const stale=spx.asOf&&!/live/.test(spx.asOf)&&(S.live[spx.etf]?.day||'')<today();
-  p.push(`${stale?'At the last close, US':'US'} stocks ${stale?'had':'are having'} ${tone}: ${[spx,ndq,dji,rut].filter(Boolean).map(mv).join(', ')}.${ndq&&spx&&Math.abs(ndq.chgPct-spx.chgPct)>=.5?` ${ndq.chgPct>spx.chgPct?'Growth and technology are leading':'Technology is lagging the broader market'}.`:''}${rut&&spx&&rut.chgPct-spx.chgPct>=.7?' Small caps are outperforming.':''}`);
-  if(pr.length){const sd=spx.chgPct/100,pd=T.mv-T.day?T.day/(T.mv-T.day):null,srt=[...pr].sort((a,b)=>(b.dayPct??0)-(a.dayPct??0)),up=srt.filter(r=>r.dayPct>0),dn=srt.filter(r=>r.dayPct<0),lead=srt[0],lag=srt[srt.length-1];
-    let s=`Your book is ${pct(pd)} (${susd(T.day)}), ${pd!=null?(Math.abs(pd-sd)<.0015?'in line with':pd>sd?'ahead of':'behind')+' the S&P 500':''}${pd!=null&&Math.abs(pd-sd)>=.0015?` by ${Math.abs((pd-sd)*100).toFixed(2)} points`:''}.`;
-    if(pr.length>1){s+=` ${up.length} of ${pr.length} holdings are up.`;if(lead?.dayPct>0)s+=` ${lead.t} leads at ${pct(lead.dayPct)}${up[1]?.dayPct>0.005?` with ${up[1].t} ${pct(up[1].dayPct)}`:''}`;if(lag?.dayPct<0)s+=`${lead?.dayPct>0?'; ':' '}${lag.t} is the drag at ${pct(lag.dayPct)}${dn.length>1&&dn[dn.length-2].dayPct<-0.005?` with ${dn[dn.length-2].t} ${pct(dn[dn.length-2].dayPct)}`:''}`;s+='.';}
-    const bigm=srt.filter(r=>Math.abs(r.dayPct)>=.04);if(bigm.length)s+=` ${bigm.map(r=>r.t).join(', ')} ${bigm.length>1?'are moving more than 4%':'is moving more than 4%'}, worth a look at the news below.`;
-    p.push(s);}
-  const ev=(S.econ?.events||[]).filter(e=>e.days<=5&&e.kind!=='early'),er=[...rows.filter(r=>r.q?.earn?.next&&daysTo(r.q.earn.next.date)<=5)].sort((a,b)=>a.q.earn.next.date.localeCompare(b.q.earn.next.date));
-  if(ev.length||er.length){const bits=[...ev.map(e=>`${e.title.replace('US markets ','markets ')} ${e.days===0?'today':e.days===1?'tomorrow':'on '+fdate(e.date)}`),...er.map(r=>`${r.t} reports ${daysTo(r.q.earn.next.date)===0?'today':daysTo(r.q.earn.next.date)===1?'tomorrow':'on '+fdate(r.q.earn.next.date)}${sess(r.q.earn.next.time)?' '+sess(r.q.earn.next.time):''}`)];
-    p.push(`Ahead: ${bits.slice(0,5).join('; ')}.`);}
-  const rf=S.market.rates?.tbill3m;if(rf!=null)p.push(`The 3-month T-bill yields ${nf(rf)}%.`);
-  const held=new Set(rows.map(r=>r.t)),nw=S.news.filter(n=>held.has(n.ticker)&&n.sent!=null),by={};for(const n of nw)(by[n.ticker]??=[]).push(n.sent);
-  const tn=Object.entries(by).map(([t,a])=>[t,sum(a,x=>x)/a.length]).filter(x=>Math.abs(x[1])>=.15).sort((a,b)=>b[1]-a[1]);
-  if(tn.length){const pos=tn.filter(x=>x[1]>0).map(x=>x[0]),neg=tn.filter(x=>x[1]<0).map(x=>x[0]);p.push(`News tone is ${pos.length?'positive on '+pos.join(', '):''}${pos.length&&neg.length?' and ':''}${neg.length?'negative on '+neg.join(', '):''}; the rest of the book is neutral.`);}
-  return p;
-}
 function rOverview(M){
   const {rows,pr,T,st}=M;
-  if(S.got.lots){const cm=commentary(M),mn=S.market.news||[];
-    $('comment').innerHTML=cm.length?`<div style="display:flex;flex-direction:column;gap:8px;max-width:78ch;font-size:14px;line-height:1.5">${cm.map(x=>`<p style="margin:0">${esc(x)}</p>`).join('')}</div>`+(mn.length?`<div style="margin-top:14px"><h3 style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 6px">Market headlines</h3><ul class="news" style="margin:0 -16px">${mn.slice(0,5).map(n=>`<li style="grid-template-columns:minmax(0,1fr) auto"><span><a href="${esc(safeUrl(n.url))}" target="_blank" rel="noopener">${esc(n.title)}</a><div class="src">${esc(n.source||'')} ${sentChip(n)}</div></span><span class="num mut" style="font-size:12px;white-space:nowrap">${ntime(n)}</span></li>`).join('')}</ul></div>`:''):'<div class="empty">The commentary appears once index prices load.</div>';}
   const ix=S.market.indexes?.list||[];
   if(ix.length)$('tape').innerHTML=ix.map(x=>`<div title="${esc(x.asOf||'')}"><b>${esc(x.name)}</b><span class="lv">${nf(x.last)}</span> <span class="${cls(x.chgPct)}" style="font-size:12.5px">${pct(x.chgPct/100)}</span><span class="mut" style="display:block;font-size:11px;font-family:var(--sans)">${esc(x.asOf||'')}</span></div>`).join('');
   const box=$('heat');

@@ -26,7 +26,7 @@ UNIVERSE_ETFS = ("SPY", "QQQ")        # the screen covers what these two hold
 WEEK = 7 * 24 * 3600
 FEEDS = {"quote": "Prices", "hist": "Price history", "ov": "Fundamentals and targets", "news": "News",
          "rates": "Treasury yield", "earn": "Earnings history", "ecal": "Earnings calendar",
-         "est": "Earnings estimates", "etf": "Index members", "intra": "Hourly prices", "mnews": "Market news"}
+         "est": "Earnings estimates", "etf": "Index members", "intra": "Hourly prices"}
 PRESET_WATCH = ["STX", "MU", "IREN", "USAR", "META", "BABA", "STRL", "TSM", "TTMI", "SIMO"]
 
 
@@ -130,7 +130,6 @@ class Engine:
                 for s in held:
                     await self._fresh("news", s, 3600, self._load_news)
                 await self._fresh("rates", "", 12 * 3600, self._load_rates)
-                await self._fresh("mnews", "", 3600, self._load_market_news, quiet=True)
                 await self._fresh("ecal", "", 12 * 3600, self._load_calendar)
                 for s in dict.fromkeys(held + watch):
                     await self._fresh("earn", s, 24 * 3600, self._load_earnings)
@@ -288,9 +287,6 @@ class Engine:
 
     async def _load_overview(self, sym):
         return {**await self.av.overview(sym), "v": OV_VERSION}
-
-    async def _load_market_news(self, _):
-        return {"items": await self.av.market_news()}
 
     async def _load_news(self, sym):
         return {"items": await self.av.news(sym)}
@@ -497,7 +493,6 @@ class Engine:
             "watchlist": watchlist, "news": news,
             "market": {"indexes": {"list": tape},
                        "rates": {"tbill3m": rates.get("tbill3m"), "asOf": rates.get("asOf")},
-                       "news": (self.store.get("mnews") or {}).get("items") or [],
                        "meta": {"updated": max(stamps) if stamps else None}},
             "alerts": self.alerts(),
             "econ": {"events": econ.upcoming(now_ny().date()), "through": econ.coverage()},
