@@ -239,6 +239,10 @@ th[aria-sort="ascending"]::after{content:" \25B2";font-size:9px} th[aria-sort="d
   <div class="tabpage" id="tab-overview">
     <section class="tape num" id="tape" aria-label="Market indexes"><div><b>MARKET INDEXES</b><span class="lv mut">Loading…</span></div></section>
     <section class="panel">
+      <div class="ph"><h2>Market commentary</h2><span class="mut" style="font-size:12px">Written by the app from today's prices, your book, the calendar and the news tone. Not advice</span></div>
+      <div class="pb" id="comment"><div class="empty">The commentary appears once prices load.</div></div>
+    </section>
+    <section class="panel">
       <div class="ph"><h2>Today's map</h2><span class="mut" style="font-size:12px">Each tile is a holding, sized by weight and coloured by today's move. Select one for its detail</span></div>
       <div class="heat" id="heat"><div class="empty">The map appears once prices load.</div></div>
     </section>
@@ -371,9 +375,9 @@ th[aria-sort="ascending"]::after{content:" \25B2";font-size:9px} th[aria-sort="d
       <div style="display:flex;gap:8px;align-items:center"><input id="aWDef" inputmode="decimal" placeholder="Off" style="width:110px"><span class="mut">% (leave empty for no general alert)</span></div>
       <label for="aEarn" style="font-weight:600">Alert when a holding or watchlist stock is this close to reporting earnings</label>
       <div style="display:flex;gap:8px;align-items:center"><input id="aEarn" inputmode="numeric" placeholder="Off" style="width:110px"><span class="mut">days before the report (0 or empty for none)</span></div>
-      <div class="mut" style="font-size:12.5px">Set a different price level for a single stock below. Leave a box empty to use the general level.</div>
+      <div class="mut" style="font-size:12.5px">Per stock below: a different move level, or a price alert that fires once when the stock reaches that price and then clears itself. Leave a box empty to use the general level.</div>
     </div>
-    <div class="scroll" style="max-height:40vh;overflow-y:auto"><table><thead><tr><th>Stock</th><th>Today</th><th>Alert at &plusmn; %</th></tr></thead><tbody id="aRows"></tbody></table></div>
+    <div class="scroll" style="max-height:40vh;overflow-y:auto"><table><thead><tr><th>Stock</th><th>Price</th><th>Move alert &plusmn; %</th><th>Price alert above</th><th>Price alert below</th></tr></thead><tbody id="aRows"></tbody></table></div>
     <div class="pb note" id="aNote" style="padding-block:10px"></div>
     <div class="dfoot"><span class="err" id="aErr"></span><button type="button" id="pushTest" hidden>Send a test alert</button><button class="primary" id="aSave">Save alerts</button></div>
   </form>
@@ -480,7 +484,7 @@ function find(t,M){
 }
 // Price alerts that fired on the session now showing, by ticker.
 function firedMap(M){const WR=watchRows(),m=new Map();
-  for(const e of S.events){if(e.kind==='earnings')continue;const q=(M.rows.find(r=>r.t===e.ticker)||WR.find(r=>r.t===e.ticker))?.q;if(q&&(q.live?.day||(q.asOf||'').slice(0,10))===e.day)m.set(e.ticker,e);}
+  for(const e of S.events){if(e.kind)continue;const q=(M.rows.find(r=>r.t===e.ticker)||WR.find(r=>r.t===e.ticker))?.q;if(q&&(q.live?.day||(q.asOf||'').slice(0,10))===e.day)m.set(e.ticker,e);}
   return m;}
 // Squarified treemap: rectangles with area in proportion to value, kept close to square.
 function treemap(items,W,H){
@@ -528,6 +532,7 @@ function chrome(M){
   }
   const fired=firedMap(M),WR=watchRows(),gone=dismissed(),td=today();
   const shown=[...[...fired.values()].filter(e=>!gone.includes(e.id)).map(e=>[e.id,`${e.ticker} moved ${pct(e.pct/100)} today, past your ${nf(e.threshold,1)}% alert${WR.some(r=>r.t===e.ticker)?' (watchlist)':''}. Price ${nf(e.last)} at ${new Date(e.at*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}.`]),
+    ...S.events.filter(e=>e.kind==='price'&&e.day>=td&&!gone.includes(e.id)).map(e=>[e.id,`${e.ticker} ${e.dir==='above'?'reached':'fell to'} ${nf(e.last)}, ${e.dir} your ${nf(e.level)} price alert${e.watch?' (watchlist)':''}. ${pct(e.pct/100)} today. The alert has been cleared.`]),
     ...S.events.filter(e=>e.kind==='earnings'&&e.date>=td&&!gone.includes(e.id)).map(e=>[e.id,`${e.ticker} reports earnings ${when(daysTo(e.date))}, ${fdate(e.date)}${sess(e.time)?' '+sess(e.time):''}${e.watch?' (watchlist)':''}.${e.est!=null?' EPS estimate '+nf(e.est)+'.':''}`])];
   $('alerts').hidden=!shown.length;
   $('alerts').innerHTML=shown.map(([id,t])=>`<div><span>${esc(t)}</span><button type="button" data-dismiss="${esc(id)}">Dismiss</button></div>`).join('');
@@ -541,8 +546,32 @@ function chrome(M){
 }
 
 // ---------- Overview
+function commentary(M){
+  const {rows,pr,T}=M,ix=S.market.indexes?.list||[],g=k=>ix.find(x=>x.sym===k),spx=g('SPX'),ndq=g('IXIC'),dji=g('DJI'),rut=g('RUT');
+  if(!spx)return '';
+  const p=[],mv=x=>x?`${x.name.replace(/ \(.*\)$/,'')} ${pct(x.chgPct/100)}`:'';
+  const ups=[spx,ndq,dji,rut].filter(Boolean).filter(x=>x.chgPct>0).length,all=[spx,ndq,dji,rut].filter(Boolean).length,big=Math.max(...[spx,ndq].filter(Boolean).map(x=>Math.abs(x.chgPct)));
+  const tone=ups===all?(big>=1?'a broad rally':'a quiet, positive session'):ups===0?(big>=1?'a broad sell-off':'a soft session'):'a mixed session';
+  const stale=spx.asOf&&!/live/.test(spx.asOf)&&(S.live[spx.etf]?.day||'')<today();
+  p.push(`${stale?'At the last close, US':'US'} stocks ${stale?'had':'are having'} ${tone}: ${[spx,ndq,dji,rut].filter(Boolean).map(mv).join(', ')}.${ndq&&spx&&Math.abs(ndq.chgPct-spx.chgPct)>=.5?` ${ndq.chgPct>spx.chgPct?'Growth and technology are leading':'Technology is lagging the broader market'}.`:''}${rut&&spx&&rut.chgPct-spx.chgPct>=.7?' Small caps are outperforming.':''}`);
+  if(pr.length){const sd=spx.chgPct/100,pd=T.mv-T.day?T.day/(T.mv-T.day):null,srt=[...pr].sort((a,b)=>(b.dayPct??0)-(a.dayPct??0)),up=srt.filter(r=>r.dayPct>0),dn=srt.filter(r=>r.dayPct<0),lead=srt[0],lag=srt[srt.length-1];
+    let s=`Your book is ${pct(pd)} (${susd(T.day)}), ${pd!=null?(Math.abs(pd-sd)<.0015?'in line with':pd>sd?'ahead of':'behind')+' the S&P 500':''}${pd!=null&&Math.abs(pd-sd)>=.0015?` by ${Math.abs((pd-sd)*100).toFixed(2)} points`:''}.`;
+    if(pr.length>1){s+=` ${up.length} of ${pr.length} holdings are up.`;if(lead?.dayPct>0)s+=` ${lead.t} leads at ${pct(lead.dayPct)}${up[1]?.dayPct>0.005?` with ${up[1].t} ${pct(up[1].dayPct)}`:''}`;if(lag?.dayPct<0)s+=`${lead?.dayPct>0?'; ':' '}${lag.t} is the drag at ${pct(lag.dayPct)}${dn.length>1&&dn[dn.length-2].dayPct<-0.005?` with ${dn[dn.length-2].t} ${pct(dn[dn.length-2].dayPct)}`:''}`;s+='.';}
+    const bigm=srt.filter(r=>Math.abs(r.dayPct)>=.04);if(bigm.length)s+=` ${bigm.map(r=>r.t).join(', ')} ${bigm.length>1?'are moving more than 4%':'is moving more than 4%'}, worth a look at the news below.`;
+    p.push(s);}
+  const ev=(S.econ?.events||[]).filter(e=>e.days<=5&&e.kind!=='early'),er=[...rows.filter(r=>r.q?.earn?.next&&daysTo(r.q.earn.next.date)<=5)].sort((a,b)=>a.q.earn.next.date.localeCompare(b.q.earn.next.date));
+  if(ev.length||er.length){const bits=[...ev.map(e=>`${e.title.replace('US markets ','markets ')} ${e.days===0?'today':e.days===1?'tomorrow':'on '+fdate(e.date)}`),...er.map(r=>`${r.t} reports ${daysTo(r.q.earn.next.date)===0?'today':daysTo(r.q.earn.next.date)===1?'tomorrow':'on '+fdate(r.q.earn.next.date)}${sess(r.q.earn.next.time)?' '+sess(r.q.earn.next.time):''}`)];
+    p.push(`Ahead: ${bits.slice(0,5).join('; ')}.`);}
+  const rf=S.market.rates?.tbill3m;if(rf!=null)p.push(`The 3-month T-bill yields ${nf(rf)}%.`);
+  const held=new Set(rows.map(r=>r.t)),nw=S.news.filter(n=>held.has(n.ticker)&&n.sent!=null),by={};for(const n of nw)(by[n.ticker]??=[]).push(n.sent);
+  const tn=Object.entries(by).map(([t,a])=>[t,sum(a,x=>x)/a.length]).filter(x=>Math.abs(x[1])>=.15).sort((a,b)=>b[1]-a[1]);
+  if(tn.length){const pos=tn.filter(x=>x[1]>0).map(x=>x[0]),neg=tn.filter(x=>x[1]<0).map(x=>x[0]);p.push(`News tone is ${pos.length?'positive on '+pos.join(', '):''}${pos.length&&neg.length?' and ':''}${neg.length?'negative on '+neg.join(', '):''}; the rest of the book is neutral.`);}
+  return p;
+}
 function rOverview(M){
   const {rows,pr,T,st}=M;
+  if(S.got.lots){const cm=commentary(M),mn=S.market.news||[];
+    $('comment').innerHTML=cm.length?`<div style="display:flex;flex-direction:column;gap:8px;max-width:78ch;font-size:14px;line-height:1.5">${cm.map(x=>`<p style="margin:0">${esc(x)}</p>`).join('')}</div>`+(mn.length?`<div style="margin-top:14px"><h3 style="font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 6px">Market headlines</h3><ul class="news" style="margin:0 -16px">${mn.slice(0,5).map(n=>`<li style="grid-template-columns:minmax(0,1fr) auto"><span><a href="${esc(safeUrl(n.url))}" target="_blank" rel="noopener">${esc(n.title)}</a><div class="src">${esc(n.source||'')} ${sentChip(n)}</div></span><span class="num mut" style="font-size:12px;white-space:nowrap">${ntime(n)}</span></li>`).join('')}</ul></div>`:''):'<div class="empty">The commentary appears once index prices load.</div>';}
   const ix=S.market.indexes?.list||[];
   if(ix.length)$('tape').innerHTML=ix.map(x=>`<div title="${esc(x.asOf||'')}"><b>${esc(x.name)}</b><span class="lv">${nf(x.last)}</span> <span class="${cls(x.chgPct)}" style="font-size:12.5px">${pct(x.chgPct/100)}</span><span class="mut" style="display:block;font-size:11px;font-family:var(--sans)">${esc(x.asOf||'')}</span></div>`).join('');
   const box=$('heat');
@@ -605,7 +634,7 @@ function rPositions(M){
     WR.map(r=>{const q=r.q||{},hit=fired.get(r.t),a=lvl(r.t);
       return `<tr class="pos" data-t="${esc(r.t)}" tabindex="0"><td><div class="tk">${esc(r.t)}</div><div class="nm">${esc(q.name||'Awaiting market data')}</div></td>
       <td class="num">${nf(q.last)}</td><td><span class="chip ${cls(r.dayPct)}"${hit?` title="Crossed your ${nf(hit.threshold,1)}% alert"`:''}>${hit?'<span aria-hidden="true">&#9679; </span><span class="sr">Alert: </span>':''}${pct(r.dayPct)}</span></td>
-      <td class="num x">${nf(q.target?.avg)}</td><td class="num ${cls(r.up)}">${pct(r.up,1)}</td><td class="num x">${nf(q.beta5y)}</td><td class="x" style="text-align:left">${esc(q.target?.rating||'—')}</td><td class="num x">${earnCell(q)}</td><td class="num x ${a?'':'mut'}">${a?'±'+nf(a,a%1?2:0)+'%':'Off'}</td>${S.canWrite?`<td><button type="button" class="ghost" data-rm="${esc(r.t)}" aria-label="Remove ${esc(r.t)} from the watchlist">Remove</button></td>`:''}</tr>`;}).join('')+'</tbody>'
+      <td class="num x">${nf(q.target?.avg)}</td><td class="num ${cls(r.up)}">${pct(r.up,1)}</td><td class="num x">${nf(q.beta5y)}</td><td class="x" style="text-align:left">${esc(q.target?.rating||'—')}</td><td class="num x">${earnCell(q)}</td><td class="num x ${a||S.alerts.price?.[r.t]?'':'mut'}">${[a?'±'+nf(a,a%1?2:0)+'%':'',S.alerts.price?.[r.t]?.above?'>'+nf(S.alerts.price[r.t].above):'',S.alerts.price?.[r.t]?.below?'<'+nf(S.alerts.price[r.t].below):''].filter(Boolean).join(' ')||'Off'}</td>${S.canWrite?`<td><button type="button" class="ghost" data-rm="${esc(r.t)}" aria-label="Remove ${esc(r.t)} from the watchlist">Remove</button></td>`:''}</tr>`;}).join('')+'</tbody>'
     :`<tbody><tr><td class="empty">Your watchlist is empty. ${S.canWrite?'Add a ticker above to start following it.':''}</td></tr></tbody>`;
 }
 
@@ -1118,19 +1147,22 @@ if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWor
 else addEventListener('load',()=>pushRefresh());
 $('alertBtn').addEventListener('click',()=>{const M=model();$('aErr').textContent='';$('aDef').value=S.alerts.default??'';
   $('aWDef').value=S.alerts.watchDefault??'';$('aEarn').value=S.alerts.earnDays||'';
-  const arow=(r,gen)=>`<tr><td><span class="tk">${esc(r.t)}</span></td><td class="num ${cls(r.dayPct)}">${pct(r.dayPct)}</td><td><input data-t="${esc(r.t)}" aria-label="Alert level for ${esc(r.t)}" inputmode="decimal" placeholder="${gen!=null?'General: '+gen+'%':'Off'}" value="${esc(S.alerts.by?.[r.t]??'')}" style="width:130px"></td></tr>`;
-  const wr=watchRows(),sub=t=>`<tr class="lot"><td colspan="3" style="font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:11px">${t}</td></tr>`;
+  const arow=(r,gen)=>{const px=S.alerts.price?.[r.t]||{};return `<tr><td><span class="tk">${esc(r.t)}</span></td><td class="num">${nf(r.q?.last)} <span class="${cls(r.dayPct)}" style="font-size:11.5px">${pct(r.dayPct)}</span></td><td><input data-t="${esc(r.t)}" aria-label="Move alert for ${esc(r.t)}" inputmode="decimal" placeholder="${gen!=null?'General: '+gen+'%':'Off'}" value="${esc(S.alerts.by?.[r.t]??'')}" style="width:120px"></td><td><input data-px="above" data-t="${esc(r.t)}" aria-label="Price alert above for ${esc(r.t)}" inputmode="decimal" placeholder="Off" value="${esc(px.above??'')}" style="width:110px"></td><td><input data-px="below" data-t="${esc(r.t)}" aria-label="Price alert below for ${esc(r.t)}" inputmode="decimal" placeholder="Off" value="${esc(px.below??'')}" style="width:110px"></td></tr>`;};
+  const wr=watchRows(),sub=t=>`<tr class="lot"><td colspan="5" style="font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:11px">${t}</td></tr>`;
   $('aRows').innerHTML=(M.rows.length?sub('Holdings')+M.rows.map(r=>arow(r,S.alerts.default)).join(''):'')+(wr.length?sub('Watchlist')+wr.map(r=>arow(r,S.alerts.watchDefault)).join(''):'');
-  $('aNote').textContent='Price alerts are checked each time prices refresh, earnings alerts once the report date is within range. Both show at the top of the app for everyone who signs in. To be notified on a phone or computer even when the app is closed, use Enable alerts on that device.';$('adlg').showModal();});
+  $('aNote').textContent='Move and price alerts are checked each time prices refresh (prices are 15 minutes delayed), earnings alerts once the report date is within range. Both show at the top of the app for everyone who signs in. To be notified on a phone or computer even when the app is closed, use Enable alerts on that device.';$('adlg').showModal();});
 $('aClose').addEventListener('click',()=>$('adlg').close());
 $('aform').addEventListener('submit',async e=>{e.preventDefault();const err=$('aErr');err.textContent='';
   const num=v=>{v=String(v).trim().replace('%','');if(v==='')return null;const x=+v;return x>0&&x<=100?x:NaN;};
   const def=num($('aDef').value),wdef=num($('aWDef').value),by={};
-  for(const inp of $('aRows').querySelectorAll('input')){const v=num(inp.value);if(Number.isNaN(v)){err.textContent='Alert levels are percentages between 0 and 100.';return;}if(v!=null)by[inp.dataset.t]=v;}
+  const price={};
+  for(const inp of $('aRows').querySelectorAll('input')){
+    if(inp.dataset.px){const t=inp.value.trim().replace(/[$,]/g,'');if(t==='')continue;const x=+t;if(!(x>0)){err.textContent=`The price alert for ${inp.dataset.t} must be a price.`;return;}(price[inp.dataset.t]??={})[inp.dataset.px]=x;continue;}
+    const v=num(inp.value);if(Number.isNaN(v)){err.textContent='Move alert levels are percentages between 0 and 100.';return;}if(v!=null)by[inp.dataset.t]=v;}
   if(Number.isNaN(def)||Number.isNaN(wdef)){err.textContent='Alert levels are percentages between 0 and 100.';return;}
   const ev=$('aEarn').value.trim(),earnDays=ev===''?0:+ev;if(!Number.isInteger(earnDays)||earnDays<0||earnDays>30){err.textContent='Earnings alerts take a whole number of days, up to 30.';return;}
   $('aSave').disabled=true;
-  try{apply(await api('/api/alerts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({default:def,watchDefault:wdef,by,earnDays})}));$('adlg').close();}
+  try{apply(await api('/api/alerts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({default:def,watchDefault:wdef,by,earnDays,price})}));$('adlg').close();}
   catch(x){err.textContent=x.message||'Could not save.';}
   $('aSave').disabled=false;});
 

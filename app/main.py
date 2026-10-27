@@ -57,6 +57,10 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
 
     def notify(e: dict) -> None:
         where = " (watchlist)" if e.get("watch") else ""
+        if e.get("kind") == "price":
+            push.send(f'{e["ticker"]} {"reached" if e["dir"] == "above" else "fell to"} {e["last"]:,.2f}{where}',
+                      f'{"Above" if e["dir"] == "above" else "Below"} your {e["level"]:,.2f} price alert. {e["pct"]:+.2f}% today.', e["id"])
+            return
         if e.get("kind") == "earnings":
             when = "today" if e["days"] == 0 else "tomorrow" if e["days"] == 1 else f'in {e["days"]} days'
             day = dt.date.fromisoformat(e["date"]).strftime("%a %b %-d")
@@ -323,8 +327,35 @@ def create_app(store: Store | None = None, av="env") -> FastAPI:
                 raise HTTPException(400, "Earnings alerts take a number of days between 0 and 30") from None
             if not (0 <= earn_days <= 30):
                 raise HTTPException(400, "Earnings alerts take a number of days between 0 and 30")
+        price = None                                        # absent: keep the current levels
+        if "price" in body:
+            raw = body.get("price") or {}
+            if not isinstance(raw, dict) or len(raw) > MAX_LOTS:
+                raise HTTPException(400, "Send price alerts by ticker")
+            price = {}
+            for t, v in raw.items():
+                t = str(t).strip().upper()
+                if not TICKER.match(t) or not isinstance(v, dict):
+                    raise HTTPException(400, f"Not a ticker: {t[:12]}")
+                lv = {}
+                for d in ("above", "below"):
+                    x = v.get(d)
+                    if x is None or x == "":
+                        continue
+                    try:
+                        x = float(x)
+                    except (TypeError, ValueError):
+                        raise HTTPException(400, f"The price alert for {t} must be a number") from None
+                    if not (0 < x < 1e9):
+                        raise HTTPException(400, f"The price alert for {t} must be a number")
+                    q = store.get(f"quote:{t}")
+                    if q and ((d == "above" and x <= q["last"]) or (d == "below" and x >= q["last"])):
+                        raise HTTPException(400, f'{t} is at {q["last"]:,.2f}: an "{d}" alert must be {d} that')
+                    lv[d] = x
+                if lv:
+                    price[t] = lv
         await asyncio.to_thread(engine.set_alerts, level(body.get("default")), level(body.get("watchDefault")),
-                                by, earn_days)
+                                by, earn_days, price)
         await asyncio.to_thread(engine.check_earnings)
         # Check the new levels against the prices already loaded.
         for sym in await asyncio.to_thread(lambda: engine.held() + engine.watchlist()):

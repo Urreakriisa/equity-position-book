@@ -127,6 +127,12 @@ class FakeAV:
                  "sent": round(0.3 - i * 0.25, 2), "label": ("Bullish", "Neutral", "Somewhat-Bearish")[i]}
                 for i in range(3)]
 
+    async def market_news(self):
+        self.calls.append(("mnews", None))
+        return [{"title": f"Market headline {i}", "source": "Example Wire", "url": f"https://example.com/m/{i}",
+                 "ts": "2026100%dT140000" % (7 - i), "date": "2026-10-0%d" % (7 - i), "sent": 0.2 - i * 0.2,
+                 "label": ("Somewhat-Bullish", "Neutral", "Somewhat-Bearish")[i]} for i in range(3)]
+
     async def tbill(self):
         return {"tbill3m": 4.21, "asOf": "2026-10-06"}
 

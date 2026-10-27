@@ -26,7 +26,7 @@ UNIVERSE_ETFS = ("SPY", "QQQ")        # the screen covers what these two hold
 WEEK = 7 * 24 * 3600
 FEEDS = {"quote": "Prices", "hist": "Price history", "ov": "Fundamentals and targets", "news": "News",
          "rates": "Treasury yield", "earn": "Earnings history", "ecal": "Earnings calendar",
-         "est": "Earnings estimates", "etf": "Index members", "intra": "Hourly prices"}
+         "est": "Earnings estimates", "etf": "Index members", "intra": "Hourly prices", "mnews": "Market news"}
 PRESET_WATCH = ["STX", "MU", "IREN", "USAR", "META", "BABA", "STRL", "TSM", "TTMI", "SIMO"]
 
 
@@ -130,6 +130,7 @@ class Engine:
                 for s in held:
                     await self._fresh("news", s, 3600, self._load_news)
                 await self._fresh("rates", "", 12 * 3600, self._load_rates)
+                await self._fresh("mnews", "", 3600, self._load_market_news, quiet=True)
                 await self._fresh("ecal", "", 12 * 3600, self._load_calendar)
                 for s in dict.fromkeys(held + watch):
                     await self._fresh("earn", s, 24 * 3600, self._load_earnings)
@@ -232,39 +233,50 @@ class Engine:
     def alerts(self) -> dict:
         a = self.store.get("alerts") or {}
         return {"default": a.get("default"), "watchDefault": a.get("watchDefault"), "by": a.get("by") or {},
-                "earnDays": a.get("earnDays", 3)}       # 0 turns earnings alerts off
+                "earnDays": a.get("earnDays", 3),       # 0 turns earnings alerts off
+                "price": a.get("price") or {}}          # ticker -> {"above": x, "below": y}: fire once, then clear
 
     def set_alerts(self, default: float | None, watch_default: float | None, by: dict[str, float],
-                   earn_days: int | None = None) -> None:
-        if earn_days is None:
-            earn_days = self.alerts()["earnDays"]
+                   earn_days: int | None = None, price: dict | None = None) -> None:
+        cur = self.alerts()
         self.store.put("alerts", {"default": default, "watchDefault": watch_default, "by": by,
-                                  "earnDays": earn_days})
+                                  "earnDays": cur["earnDays"] if earn_days is None else earn_days,
+                                  "price": cur["price"] if price is None else price})
 
     def _check_alert(self, sym: str, q: dict) -> None:
         """Record the first time a stock's move for the day reaches its alert
         level. One event per stock, per trading day, per level. A stock's own
         level wins; otherwise holdings and watchlist names each have a general one."""
         cfg = self.alerts()
-        if sym in self.held():
+        held = sym in self.held()
+        if held:
             general = cfg["default"]
         elif sym in self.watchlist():
             general = cfg["watchDefault"]
         else:
             return
         level = cfg["by"].get(sym, general)
-        if not level:
-            return
         move = (q["last"] / q["prevClose"] - 1) * 100
-        if abs(move) < level:
-            return
+        if level and abs(move) >= level:
+            self._fire({"id": f'{sym}-{q["day"]}-{level:g}', "ticker": sym, "day": q["day"], "pct": round(move, 2),
+                        "threshold": level, "last": q["last"], "at": time.time(), "watch": not held})
+        # Price levels: alert once when the price reaches the level, then clear it.
+        px = dict(cfg["price"].get(sym) or {})
+        hit = [d for d, lv in px.items() if lv and ((d == "above" and q["last"] >= lv) or (d == "below" and q["last"] <= lv))]
+        if hit:
+            for d in hit:
+                self._fire({"id": f'px-{sym}-{d}-{px[d]:g}-{q["day"]}', "kind": "price", "ticker": sym, "day": q["day"],
+                            "dir": d, "level": px[d], "last": q["last"], "pct": round(move, 2), "at": time.time(),
+                            "watch": not held})
+                px.pop(d)
+            price = {**cfg["price"], sym: px} if px else {k: v for k, v in cfg["price"].items() if k != sym}
+            self.store.put("alerts", {**self.store.get("alerts"), "price": price})
+
+    def _fire(self, event: dict) -> None:
+        """Record an alert event once, and notify."""
         events = (self.store.get("alert_events") or {}).get("items", [])
-        eid = f'{sym}-{q["day"]}-{level:g}'
-        if any(e["id"] == eid for e in events):
+        if any(e["id"] == event["id"] for e in events):
             return
-        event = {"id": eid, "ticker": sym, "day": q["day"], "pct": round(move, 2),
-                 "threshold": level, "last": q["last"], "at": time.time(),
-                 "watch": sym not in self.held()}
         events.append(event)
         self.store.put("alert_events", {"items": events[-100:]})
         if self.on_alert:
@@ -272,10 +284,13 @@ class Engine:
                 self.on_alert(event)
             except Exception:                              # a notifier must never break pricing
                 log.exception("alert notifier failed")
-        log.info("alert: %s moved %.2f%% (level %s%%)", sym, move, level)
+        log.info("alert: %s", event["id"])
 
     async def _load_overview(self, sym):
         return {**await self.av.overview(sym), "v": OV_VERSION}
+
+    async def _load_market_news(self, _):
+        return {"items": await self.av.market_news()}
 
     async def _load_news(self, sym):
         return {"items": await self.av.news(sym)}
@@ -482,6 +497,7 @@ class Engine:
             "watchlist": watchlist, "news": news,
             "market": {"indexes": {"list": tape},
                        "rates": {"tbill3m": rates.get("tbill3m"), "asOf": rates.get("asOf")},
+                       "news": (self.store.get("mnews") or {}).get("items") or [],
                        "meta": {"updated": max(stamps) if stamps else None}},
             "alerts": self.alerts(),
             "econ": {"events": econ.upcoming(now_ny().date()), "through": econ.coverage()},

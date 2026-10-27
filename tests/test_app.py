@@ -167,7 +167,7 @@ def test_price_alerts(client):
     moves = {t: (st["live"][t]["last"] / st["live"][t]["prevClose"] - 1) * 100 for t in held}
     big = max(held, key=lambda t: abs(moves[t]))
     small = min(held, key=lambda t: abs(moves[t]))
-    assert st["alerts"] == {"default": None, "watchDefault": None, "by": {}, "earnDays": 3} and st["alertEvents"] == []
+    assert st["alerts"] == {"default": None, "watchDefault": None, "by": {}, "earnDays": 3, "price": {}} and st["alertEvents"] == []
 
     # a general level just under the biggest move: only holdings past it fire
     level = round(abs(moves[big]) - 0.01, 2)
@@ -184,7 +184,7 @@ def test_price_alerts(client):
 
     # a per-holding level overrides the general one
     st = client.put("/api/alerts", json={"default": None, "by": {small: 0.0001}}).json()
-    assert st["alerts"] == {"default": None, "watchDefault": None, "by": {small: 0.0001}, "earnDays": 3}
+    assert st["alerts"] == {"default": None, "watchDefault": None, "by": {small: 0.0001}, "earnDays": 3, "price": {}}
     assert small in {e["ticker"] for e in st["alertEvents"]}
 
     for bad in ({"default": -1}, {"default": "abc"}, {"default": 150}, {"by": {"<x>": 2}}, {"by": [1]}):
@@ -608,3 +608,39 @@ def test_hourly_bars_for_the_month_chart(client):
     assert sum(1 for c in client.fake.calls if c[0] == "intra") == 1           # cached between calls
     assert client.get("/api/intraday?symbol=BADTICKER").status_code == 404
     assert client.get("/api/intraday?symbol=1x").status_code == 400
+
+
+def test_price_level_alerts_fire_once_and_clear(client, monkeypatch):
+    sent = []
+    monkeypatch.setattr(client.app.state.push, "send", lambda *a: sent.append(a))
+    client.post("/login", data={"password": "edit-pass"})
+    load(client.engine, ["NVDA", "MSFT"])
+    st = client.get("/api/state").json()
+    last = st["live"]["NVDA"]["last"]
+    # a level on the wrong side of the price is refused, with the price in the message
+    r = client.put("/api/alerts", json={"price": {"NVDA": {"above": last - 1}}})
+    assert r.status_code == 400 and f"{last:,.2f}" in r.json()["detail"]
+    assert client.put("/api/alerts", json={"price": {"NVDA": {"below": last + 1}}}).status_code == 400
+    assert client.put("/api/alerts", json={"price": {"NVDA": {"above": "x"}}}).status_code == 400
+    # levels are kept, and other settings saved without "price" leave them alone
+    st = client.put("/api/alerts", json={"price": {"NVDA": {"above": last * 1.02, "below": last * 0.98}, "MSFT": {"above": 1e6}}}).json()
+    assert st["alerts"]["price"]["NVDA"] == {"above": round(last * 1.02, 10), "below": round(last * 0.98, 10)} and st["alertEvents"] == []
+    assert client.put("/api/alerts", json={"default": 50}).json()["alerts"]["price"]["MSFT"] == {"above": 1e6}
+    # the price reaches the upper level: one event, one push, the level is cleared, the lower one stays
+    q = client.engine.store.get("quote:NVDA")
+    client.engine._check_alert("NVDA", {**q, "last": round(last * 1.03, 2)})
+    st = client.get("/api/state").json()
+    ev = [e for e in st["alertEvents"] if e.get("kind") == "price"]
+    assert len(ev) == 1 and ev[0]["dir"] == "above" and ev[0]["ticker"] == "NVDA"
+    assert st["alerts"]["price"]["NVDA"] == {"below": round(last * 0.98, 10)}
+    assert len(sent) == 1 and sent[0][0].startswith("NVDA reached") and "Above your" in sent[0][1]
+    client.engine._check_alert("NVDA", {**q, "last": round(last * 1.04, 2)})
+    assert len([e for e in client.get("/api/state").json()["alertEvents"] if e.get("kind") == "price"]) == 1
+    # the lower level fires and NVDA drops out of the price map entirely
+    client.engine._check_alert("NVDA", {**q, "last": round(last * 0.9, 2)})
+    st = client.get("/api/state").json()
+    assert "NVDA" not in st["alerts"]["price"] and len(sent) == 2 and "fell to" in sent[1][0]
+    # market headlines ride on the state for the commentary
+    asyncio.run(client.engine._fresh("mnews", "", 0, client.engine._load_market_news))
+    news = client.get("/api/state").json()["market"]["news"]
+    assert len(news) == 3 and news[0]["label"] and news[0]["url"].startswith("https://")
