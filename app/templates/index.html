@@ -910,7 +910,7 @@ function analyze(h){
   // and require a real move into the first extreme: it is the 20-session extreme and ends a leg of 8% or more.
   if(ph.length>=2){const b=ph[ph.length-1];
     for(let q=ph.length-2;q>=0;q--){const a=ph[q],gap=b.i-a.i,top=Math.max(a.y,b.y);
-      if(gap<10||gap>65||Math.abs(a.y-b.y)/top>.045)continue;
+      if(gap<10||gap>65||Math.min(Math.abs(a.y-b.y)/top,Math.abs(c[a.i]-c[b.i])/Math.max(c[a.i],c[b.i]))>.03)continue;   // same level on wicks or on closes
       if(mxI(a.i+1,b.i-1).y>top*1.01)break;
       const t=mnI(a.i,b.i);
       if((Math.min(a.y,b.y)-t.y)/t.y>=.06&&(top-t.y)/top<=.4&&last-b.i<=45&&mxI(b.i+1,last).y<=top*1.01&&legTop(a)&&mnI(a.i-30,a.i).y<=a.y*.92){const cf=C<t.y;
@@ -918,7 +918,7 @@ function analyze(h){
       break;}}
   if(pl.length>=2){const b=pl[pl.length-1];
     for(let q=pl.length-2;q>=0;q--){const a=pl[q],gap=b.i-a.i,bot=Math.min(a.y,b.y);
-      if(gap<10||gap>65||Math.abs(a.y-b.y)/bot>.045)continue;
+      if(gap<10||gap>65||Math.min(Math.abs(a.y-b.y)/bot,Math.abs(c[a.i]-c[b.i])/Math.min(c[a.i],c[b.i]))>.03)continue;
       if(mnI(a.i+1,b.i-1).y<bot*.99)break;
       const t=mxI(a.i,b.i);
       if((t.y-Math.max(a.y,b.y))/t.y>=.06&&(t.y-bot)/t.y<=.4&&last-b.i<=45&&mnI(b.i+1,last).y>=bot*.99&&legBot(a)&&mxI(a.i-30,a.i).y>=a.y*1.08){const cf=C>t.y;
