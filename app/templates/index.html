@@ -865,23 +865,28 @@ function analyze(h){
   for(let i=Math.max(k,n-170);i<n-k;i++){let hi=true,lo=true;for(let j=i-k;j<=i+k;j++){if(H[j]>H[i])hi=false;if(L[j]<L[i])lo=false;}
     if(hi&&(!ph.length||i-ph[ph.length-1].i>k))ph.push({i,y:H[i]});if(lo&&(!pl.length||i-pl[pl.length-1].i>k))pl.push({i,y:L[i]});}
   const mxI=(a,b)=>{let v=-1e99,x=a;for(let i=Math.max(0,a);i<=b;i++)if(H[i]>v){v=H[i];x=i}return{i:x,y:v}},mnI=(a,b)=>{let v=1e99,x=a;for(let i=Math.max(0,a);i<=b;i++)if(L[i]<v){v=L[i];x=i}return{i:x,y:v}};
+  // A swing in the last five sessions is not confirmed yet, but counts once price has turned 4% away from it,
+  // so a second bottom or top is seen when it happens rather than a week later.
+  {let lo=mnI(n-k,last),hi=mxI(n-k,last);
+    if(lo.i<last&&(!pl.length||lo.i-pl[pl.length-1].i>k)&&mnI(lo.i-k,lo.i-1).y>=lo.y&&C>=lo.y*1.04)pl.push({i:lo.i,y:lo.y,fresh:true});
+    if(hi.i<last&&(!ph.length||hi.i-ph[ph.length-1].i>k)&&mxI(hi.i-k,hi.i-1).y<=hi.y&&C<=hi.y*.96)ph.push({i:hi.i,y:hi.y,fresh:true});}
   const add=(name,bias,status,text,lines,target,curve)=>out.push({name,bias,status,text,lines,target,curve});
   // Double top / bottom: pair the latest swing extreme with an earlier one at the same level (not only the adjacent one),
   // and require a real move into the first extreme: it is the 20-session extreme and ends a leg of 8% or more.
   if(ph.length>=2){const b=ph[ph.length-1];
     for(let q=ph.length-2;q>=0;q--){const a=ph[q],gap=b.i-a.i,top=Math.max(a.y,b.y);
-      if(gap<10||gap>90||Math.abs(a.y-b.y)/top>.025)continue;
+      if(gap<10||gap>90||Math.abs(a.y-b.y)/top>.045)continue;
       if(mxI(a.i+1,b.i-1).y>top*1.01)break;
       const t=mnI(a.i,b.i);
-      if((Math.min(a.y,b.y)-t.y)/t.y>=.06&&(top-t.y)/top<=.18&&last-b.i<=45&&mxI(b.i+1,last).y<=top*1.01&&mxI(a.i-20,a.i-1).y<=a.y&&mnI(a.i-30,a.i).y<=a.y*.92){const cf=C<t.y;
+      if((Math.min(a.y,b.y)-t.y)/t.y>=.06&&(top-t.y)/top<=.4&&last-b.i<=45&&mxI(b.i+1,last).y<=top*1.01&&mxI(a.i-20,a.i-1).y<=a.y&&mnI(a.i-30,a.i).y<=a.y*.92){const cf=C<t.y;
         add('Double top','Bearish',cf?'Confirmed':'Forming',`Two peaks near ${nf(top)} (${dlabel(d[a.i])} and ${dlabel(d[b.i])}) over a ${nf(t.y)} neckline. ${cf?'Price has closed below the neckline.':'A close below the neckline would confirm it.'}`,[[a.i,top,last,top],[a.i,t.y,last,t.y]],t.y-(top-t.y));}
       break;}}
   if(pl.length>=2){const b=pl[pl.length-1];
     for(let q=pl.length-2;q>=0;q--){const a=pl[q],gap=b.i-a.i,bot=Math.min(a.y,b.y);
-      if(gap<10||gap>90||Math.abs(a.y-b.y)/bot>.025)continue;
+      if(gap<10||gap>90||Math.abs(a.y-b.y)/bot>.045)continue;
       if(mnI(a.i+1,b.i-1).y<bot*.99)break;
       const t=mxI(a.i,b.i);
-      if((t.y-Math.max(a.y,b.y))/t.y>=.06&&(t.y-bot)/t.y<=.18&&last-b.i<=45&&mnI(b.i+1,last).y>=bot*.99&&mnI(a.i-20,a.i-1).y>=a.y&&mxI(a.i-30,a.i).y>=a.y*1.08){const cf=C>t.y;
+      if((t.y-Math.max(a.y,b.y))/t.y>=.06&&(t.y-bot)/t.y<=.4&&last-b.i<=45&&mnI(b.i+1,last).y>=bot*.99&&mnI(a.i-20,a.i-1).y>=a.y&&mxI(a.i-30,a.i).y>=a.y*1.08){const cf=C>t.y;
         add('Double bottom','Bullish',cf?'Confirmed':'Forming',`Two lows near ${nf(bot)} (${dlabel(d[a.i])} and ${dlabel(d[b.i])}) under a ${nf(t.y)} neckline. ${cf?'Price has closed above the neckline.':'A close above the neckline would confirm it.'}`,[[a.i,bot,last,bot],[a.i,t.y,last,t.y]],t.y+(t.y-bot));}
       break;}}
   if(ph.length>=3){const [l,x,r]=ph.slice(-3);
