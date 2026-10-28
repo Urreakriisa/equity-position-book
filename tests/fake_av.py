@@ -127,6 +127,13 @@ class FakeAV:
                  "sent": round(0.3 - i * 0.25, 2), "label": ("Bullish", "Neutral", "Somewhat-Bearish")[i]}
                 for i in range(3)]
 
+    def index_closes(self, code):
+        """Index closes in step with the ETF history, at an index-like level, through yesterday."""
+        etf = {"SPX": "SPY", "DJI": "DIA", "IXIC": "ONEQ"}[code]
+        mult = {"SPX": 8.6, "DJI": 92.0, "IXIC": 212.0}[code]
+        rows = self._rows(etf)
+        return {r[0]: round(r[4] * mult * (1 + 0.0002 * (i % 7)), 2) for i, r in enumerate(rows[:-1])}
+
     async def tbill(self):
         return {"tbill3m": 4.21, "asOf": "2026-10-06"}
 

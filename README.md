@@ -54,8 +54,12 @@ minutes before every panel is filled.
 - **History:** `TIME_SERIES_DAILY_ADJUSTED`, adjusted for splits but not dividends.
 - **Targets, ratings, beta:** `OVERVIEW`, refreshed daily. Alpha Vantage gives the
   average analyst target and the rating split, not the low and high targets.
-- **Indexes:** shown through the ETFs that track them (SPY, DIA, ONEQ, IWM).
-  Alpha Vantage index data needs a higher plan.
+- **Indexes:** the S&P 500, Dow and Nasdaq Composite closes come from FRED
+  (the St. Louis Fed's free data service, about a day behind). The app scales
+  the tracking ETF's bars (SPY, DIA, ONEQ) to those closes, so charts and the
+  tape show the index at its own level, with the ETF supplying the live move.
+  The Russell 2000 is not on FRED and stays as IWM. Alpha Vantage index data
+  needs a higher plan.
 - **News:** `NEWS_SENTIMENT`, hourly, with each story's sentiment for the stock.
 - **Earnings:** `EARNINGS_CALENDAR` (one call covers every stock, twice a day),
   `EARNINGS` for past results against estimates and `EARNINGS_ESTIMATES` for the

@@ -8,7 +8,7 @@ import logging
 import time
 from zoneinfo import ZoneInfo
 
-from . import analytics, build, econ, ideas
+from . import analytics, build, econ, fred, ideas
 from .av import AVError
 from .store import Store
 
@@ -26,7 +26,7 @@ UNIVERSE_ETFS = ("SPY", "QQQ")        # the screen covers what these two hold
 WEEK = 7 * 24 * 3600
 FEEDS = {"quote": "Prices", "hist": "Price history", "ov": "Fundamentals and targets", "news": "News",
          "rates": "Treasury yield", "earn": "Earnings history", "ecal": "Earnings calendar",
-         "est": "Earnings estimates", "etf": "Index members", "intra": "Hourly prices"}
+         "est": "Earnings estimates", "etf": "Index members", "intra": "Hourly prices", "idx": "Index levels (FRED)"}
 PRESET_WATCH = ["STX", "MU", "IREN", "USAR", "META", "BABA", "STRL", "TSM", "TTMI", "SIMO"]
 
 
@@ -130,6 +130,8 @@ class Engine:
                 for s in held:
                     await self._fresh("news", s, 3600, self._load_news)
                 await self._fresh("rates", "", 12 * 3600, self._load_rates)
+                for code in fred.SERIES:
+                    await self._fresh("idx", code, 4 * 3600, self._load_index, quiet=True)
                 await self._fresh("ecal", "", 12 * 3600, self._load_calendar)
                 for s in dict.fromkeys(held + watch):
                     await self._fresh("earn", s, 24 * 3600, self._load_earnings)
@@ -290,6 +292,25 @@ class Engine:
 
     async def _load_news(self, sym):
         return {"items": await self.av.news(sym)}
+
+    async def _load_index(self, code):
+        return {"c": await self.index_source(code)}
+
+    async def index_source(self, code):
+        return await fred.closes(code)
+
+    def index_levels(self, code: str) -> dict | None:
+        """Latest known close of the index itself, and the ETF close on that day,
+        so the page can scale the ETF's live move to the index's level."""
+        closes = (self.store.get(f"idx:{code}") or {}).get("c") or {}
+        etf = INDEX_ETFS[code][1]
+        rows = (self.store.get(f"hist:{etf}") or {}).get("rows") or []
+        etf_c = {r[0]: r[4] for r in rows}
+        common = [d for d in closes if d in etf_c]
+        if not common:
+            return None
+        d = max(common)
+        return {"date": d, "close": closes[d], "etfClose": etf_c[d]}
 
     async def _load_rates(self, _):
         return await self.av.tbill()
@@ -467,11 +488,15 @@ class Engine:
                 continue
             if (lv := self._live(etf)):
                 live[etf] = lv
+            lv_idx = self.index_levels(code) if code in fred.SERIES else None
             if code in CHART_INDEXES:
-                idx[code] = {**view, "name": name, "etf": etf}
-            tape.append({"sym": code, "name": f"{name} ({etf})", "last": view["last"],
+                idx[code] = {**view, "name": name, "etf": etf, "index": lv_idx}
+            # The tape shows the index at its own level when FRED closes are loaded: the last
+            # index close scaled by the ETF's move since that close.
+            level = round(lv_idx["close"] * view["last"] / lv_idx["etfClose"], 2) if lv_idx else view["last"]
+            tape.append({"sym": code, "name": name if lv_idx else f"{name} ({etf})", "last": level,
                          "chgPct": round((view["last"] / view["prevClose"] - 1) * 100, 2),
-                         "asOf": view["asOf"][5:]})
+                         "asOf": view["asOf"][5:], "scaled": bool(lv_idx)})
         watch, watchlist = {}, self.watchlist()
         for s in watchlist:
             ov, view = self.store.get(f"ov:{s}") or {}, self._quote_view(s)
@@ -506,6 +531,11 @@ class Engine:
 
     def history(self) -> dict:
         out = {}
+        for code in fred.SERIES:
+            closes = (self.store.get(f"idx:{code}") or {}).get("c")
+            if closes:
+                days = sorted(closes)[-HIST_ROWS:]
+                out["^" + code] = {"d": days, "c": [closes[d] for d in days]}
         for s in dict.fromkeys(self.held() + self.etfs() + self.watchlist()):
             rows = (self.store.get(f"hist:{s}") or {}).get("rows") or []
             if rows:

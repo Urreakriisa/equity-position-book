@@ -63,6 +63,8 @@ def test_parse_news_filters_by_relevance():
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    import app.engine as engine_mod
+    monkeypatch.setattr(engine_mod.Engine, "index_source", lambda self, code: _fake_index(self, code))
     monkeypatch.setenv("APP_PASSWORD", "edit-pass")
     monkeypatch.setenv("VIEW_PASSWORD", "view-pass")
     monkeypatch.setenv("SECRET_KEY", "test-secret")
@@ -76,6 +78,11 @@ def client(tmp_path, monkeypatch):
     c = TestClient(app, follow_redirects=False)
     c.fake, c.engine = av, app.state.engine
     return c
+
+
+async def _fake_index(engine, code):
+    engine.av.calls.append(("idx", code))
+    return engine.av.index_closes(code)
 
 
 def load(engine, symbols):
@@ -640,3 +647,28 @@ def test_price_level_alerts_fire_once_and_clear(client, monkeypatch):
     client.engine._check_alert("NVDA", {**q, "last": round(last * 0.9, 2)})
     st = client.get("/api/state").json()
     assert "NVDA" not in st["alerts"]["price"] and len(sent) == 2 and "fell to" in sent[1][0]
+
+
+def test_index_levels_from_fred(client):
+    from app.fred import parse
+    closes = parse("observation_date,NASDAQCOM\n2026-10-23,22810.12\n2026-10-24,.\n" + "".join(f"2026-09-{d:02d},2{d:04d}.5\n" for d in range(1, 29)))
+    assert closes["2026-10-23"] == 22810.12 and "2026-10-24" not in closes and len(closes) == 29
+    with pytest.raises(AVError):
+        parse("observation_date,X\n2026-10-23,1\n")
+    client.post("/login", data={"password": "view-pass"})
+    load(client.engine, client.engine.etfs())
+    tape = {x["sym"]: x for x in client.get("/api/state").json()["market"]["indexes"]["list"]}
+    assert tape["SPX"]["scaled"] is False and "(SPY)" in tape["SPX"]["name"]        # nothing from FRED yet
+    asyncio.run(client.engine._fresh("idx", "IXIC", 0, client.engine._load_index))
+    asyncio.run(client.engine._fresh("idx", "SPX", 0, client.engine._load_index))
+    st = client.get("/api/state").json()
+    tape = {x["sym"]: x for x in st["market"]["indexes"]["list"]}
+    lv = client.engine.index_levels("IXIC")
+    etf_last = st["live"]["ONEQ"]["last"]
+    assert tape["IXIC"]["scaled"] and tape["IXIC"]["name"] == "Nasdaq Composite" and lv["close"] > 10000
+    assert abs(tape["IXIC"]["last"] - lv["close"] * etf_last / lv["etfClose"]) < 0.02
+    assert tape["RUT"]["scaled"] is False and "(IWM)" in tape["RUT"]["name"]        # not on FRED
+    assert st["idx"]["IXIC"]["index"]["date"] == lv["date"] and st["idx"]["DJI"]["index"] is None
+    hist = client.get("/api/history").json()
+    assert "^IXIC" in hist and "^SPX" in hist and "^DJI" not in hist and len(hist["^IXIC"]["d"]) == len(hist["^IXIC"]["c"])
+    assert hist["^IXIC"]["d"][-1] < hist["ONEQ"]["d"][-1]                            # FRED lags a day
