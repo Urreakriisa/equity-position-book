@@ -879,11 +879,12 @@ function analyze(h){
       const tol=.015,touch=pts.filter(p=>p.i>A.i&&Math.abs(p.y-at(p.i))/p.y<=tol).length;
       let ok=true;for(let i=A.i;i<=last;i++){const v=isHigh?H[i]:L[i];if(isHigh?v>at(i)*(1+tol):v<at(i)*(1-tol)){if(i<last-5){ok=false;break;}}}
       if(ok&&touch>=2&&(!best||touch>best.touch))best={m,at,touch,B};}
-    if(!best)return null;const lv=best.at(last),out=isHigh?C>lv*1.01:C<lv*.99;
+    if(!best)return null;const lv=best.at(last);let out=false;for(let i=Math.max(0,last-5);i<=last;i++)if(isHigh?c[i]>best.at(i)*1.01:c[i]<best.at(i)*.99)out=true;
     return {A,lv,out,touch:best.touch,at:best.at};};
   const rl=tline(ph,true),sl=tline(pl,false);
-  if(rl&&(!rl.out||last-mxI(last-5,last).i<=5))add('Falling trend line',rl.out?'Bullish':'Bearish',rl.out?'Broke out':'Holding',`Resistance line falling from the ${dlabel(d[rl.A.i])} high through ${rl.touch} later swing highs, now near ${nf(rl.lv)}. ${rl.out?'Price has closed above it within the last week, which ends the series of lower highs.':'Each rally has stopped at it; a close above it would end the series of lower highs.'}`,[[rl.A.i,rl.A.y,last,rl.lv]],null);
-  if(sl&&(!sl.out||last-mnI(last-5,last).i<=5))add('Rising trend line',sl.out?'Bearish':'Bullish',sl.out?'Broke down':'Holding',`Support line rising from the ${dlabel(d[sl.A.i])} low through ${sl.touch} later swing lows, now near ${nf(sl.lv)}. ${sl.out?'Price has closed below it within the last week, which ends the series of higher lows.':'Each dip has held at it; a close below it would end the series of higher lows.'}`,[[sl.A.i,sl.A.y,last,sl.lv]],null);
+  // A line price has closed through is no longer a line: it is dropped, not reported as broken.
+  if(rl&&!rl.out)add('Falling trend line','Bearish','Holding',`Resistance line falling from the ${dlabel(d[rl.A.i])} high through ${rl.touch} later swing highs, now near ${nf(rl.lv)}. Each rally has stopped at it; a close above it would end the series of lower highs.`,[[rl.A.i,rl.A.y,last,rl.lv]],null);
+  if(sl&&!sl.out)add('Rising trend line','Bullish','Holding',`Support line rising from the ${dlabel(d[sl.A.i])} low through ${sl.touch} later swing lows, now near ${nf(sl.lv)}. Each dip has held at it; a close below it would end the series of higher lows.`,[[sl.A.i,sl.A.y,last,sl.lv]],null);
   // The first extreme of a double pattern must top (or bottom) its own leg: nothing higher since price was last
   // 10% below a peak, nothing lower since price was last 10% above a trough. A lower high inside a decline is not a top.
   const legTop=a=>{let j=a.i-1;while(j>0&&a.i-j<150&&L[j]>a.y*.9)j--;return mxI(j,a.i-1).y<=a.y;};
