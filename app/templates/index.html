@@ -896,6 +896,16 @@ function analyze(h){
   // 10% below a peak, nothing lower since price was last 10% above a trough. A lower high inside a decline is not a top.
   const legTop=a=>{let j=a.i-1;while(j>0&&a.i-j<150&&L[j]>a.y*.9)j--;return mxI(j,a.i-1).y<=a.y;};
   const legBot=a=>{let j=a.i-1;while(j>0&&a.i-j<150&&H[j]<a.y*1.1)j--;return mnI(j,a.i-1).y>=a.y;};
+  // Horizontal support and resistance: a level where three or more swing lows (or highs) in the last six months
+  // sit within 1.5% of each other. The most-tested level on the relevant side of the price is reported.
+  const flat=(pv,isLow)=>{const pts=pv.filter(p=>p.i>=n-130);let best=null;
+    for(const a of pts){const grp=pts.filter(p=>Math.abs(p.y-a.y)/a.y<=.015);if(grp.length<3)continue;
+      const lv=sum(grp,p=>p.y)/grp.length;if(isLow?(C<lv*.99||C>lv*1.12):(C>lv*1.01||C<lv*.88))continue;
+      if(!best||grp.length>best.n||(grp.length===best.n&&Math.abs(lv-C)<Math.abs(best.lv-C)))best={lv,n:grp.length,from:Math.min(...grp.map(p=>p.i)),dates:grp.map(p=>p.i).sort((x,y)=>x-y)};}
+    return best;};
+  const sup=flat(pl,true),res=flat(ph,false);
+  if(sup)add('Support level','Bullish','Holding',`Buyers have stepped in near ${nf(sup.lv)} ${sup.n} times since ${dlabel(d[sup.from])} (${sup.dates.map(i=>dlabel(d[i])).join(', ')}). Price is ${pct(C/sup.lv-1,1)} above it; a close below would break the floor.`,[[sup.from,sup.lv,last,sup.lv]],null);
+  if(res)add('Resistance level','Bearish','Holding',`Rallies have stalled near ${nf(res.lv)} ${res.n} times since ${dlabel(d[res.from])} (${res.dates.map(i=>dlabel(d[i])).join(', ')}). Price is ${pct(1-C/res.lv,1)} below it; a close above would clear the ceiling.`,[[res.from,res.lv,last,res.lv]],null);
   // Double top / bottom: pair the latest swing extreme with an earlier one at the same level (not only the adjacent one),
   // and require a real move into the first extreme: it is the 20-session extreme and ends a leg of 8% or more.
   if(ph.length>=2){const b=ph[ph.length-1];
